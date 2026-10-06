@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+work/
+output/
+input/
+music/
+sfx/
+fonts/*.ttf
+fonts/*.otf
+.DS_Store

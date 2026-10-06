@@ -1,0 +1,261 @@
+{
+  "_comment": "Runs out of the box after `python clip.py testmedia`. Times are BEATS relative to the drop (0).",
+  "level": 7,
+  "music": {
+    "path": "music/test_beat_130.wav",
+    "drop": 14.77,
+    "bars_before": 3,
+    "bars_after": 5
+  },
+  "look": "crisp4k",
+  "fx": {
+    "bloom": 0.15
+  },
+  "motion_blur": "flow",
+  "shots": [
+    {
+      "src": "input/test/action.mp4",
+      "from": -12,
+      "to": -8,
+      "peak": 3.0,
+      "speed": "slow",
+      "look": "dark",
+      "blur": 9,
+      "dim": 0.55
+    },
+    {
+      "src": "input/test/action.mp4",
+      "from": -8,
+      "to": -4,
+      "peak": 8.0,
+      "speed": "hold",
+      "look": "mono"
+    },
+    {
+      "src": "input/test/action.mp4",
+      "from": -4,
+      "to": -2,
+      "peak": 13.0,
+      "speed": "slow",
+      "look": "mono",
+      "fx": {
+        "vhs": 0.6
+      }
+    },
+    {
+      "src": "input/test/action.mp4",
+      "from": -2,
+      "to": 0,
+      "peak": 15.0,
+      "speed": "push",
+      "look": "dark",
+      "zoom": [
+        1.2,
+        1.6
+      ]
+    },
+    {
+      "src": "input/test/action.mp4",
+      "from": 0,
+      "to": 2,
+      "peak": 4.0,
+      "speed": "ramp"
+    },
+    {
+      "src": "input/test/action.mp4",
+      "from": 2,
+      "to": 4,
+      "peak": 10.0,
+      "speed": "boomerang"
+    },
+    {
+      "src": "input/test/action.mp4",
+      "from": 4,
+      "to": 5,
+      "peak": 16.0,
+      "speed": "quick"
+    },
+    {
+      "src": "input/test/action.mp4",
+      "from": 5,
+      "to": 6,
+      "peak": 1.5,
+      "speed": "quick",
+      "stepped_fps": 10
+    },
+    {
+      "src": "input/test/action.mp4",
+      "from": 6,
+      "to": 8,
+      "peak": 7.0,
+      "speed": "smooth",
+      "fx": {
+        "echo": 0.5
+      },
+      "mix": 0.3
+    },
+    {
+      "src": "input/test/action.mp4",
+      "from": 8,
+      "to": 12,
+      "peak": 13.0,
+      "zoom": [
+        1.0,
+        1.0
+      ],
+      "cx": 0.5,
+      "cy": 0.5,
+      "zooms": [
+        {
+          "at": 9,
+          "scale": 1.4,
+          "rot": -4
+        },
+        {
+          "at": 10,
+          "scale": 2.0,
+          "rot": 3
+        },
+        {
+          "at": 11,
+          "scale": 1.15,
+          "rot": 0
+        }
+      ]
+    },
+    {
+      "src": "input/test/action.mp4",
+      "from": 12,
+      "to": 20,
+      "peak": 9.0,
+      "speed": 0.6,
+      "look": "dark",
+      "blur": 14,
+      "dim": 0.4
+    }
+  ],
+  "thumb_wall": {
+    "paths": [
+      "input/test/thumb0.jpg",
+      "input/test/thumb1.jpg",
+      "input/test/thumb2.jpg",
+      "input/test/thumb3.jpg",
+      "input/test/thumb4.jpg",
+      "input/test/thumb5.jpg"
+    ],
+    "from": -12,
+    "to": -8,
+    "every": 0.5
+  },
+  "texts": [
+    {
+      "text": "MILLIONS",
+      "from": -12,
+      "to": -8,
+      "style": "slam",
+      "size": 170,
+      "y": 210,
+      "z": 12
+    },
+    {
+      "text": "OF [VIEWS.]",
+      "from": -10.75,
+      "to": -8,
+      "style": "slam",
+      "size": 130,
+      "y": 395,
+      "z": 12
+    },
+    {
+      "text": "THEN CAME / SILENCE",
+      "style": "poster",
+      "from": -8,
+      "to": -4,
+      "color": [
+        235,
+        30,
+        35
+      ],
+      "extras": [
+        {
+          "text": "CHAPTER 02",
+          "x": 0.5,
+          "y": 0.08,
+          "size": 28
+        },
+        {
+          "text": "THE COMEBACK  |  2026",
+          "x": 0.5,
+          "y": 0.92,
+          "size": 26,
+          "box": true
+        }
+      ]
+    },
+    {
+      "text": "BUT LEGENDS",
+      "from": -4,
+      "to": 0,
+      "style": "title",
+      "size": 110,
+      "y": 1400
+    },
+    {
+      "text": "DON'T [RETIRE.]",
+      "from": -2,
+      "to": 0,
+      "style": "slam",
+      "size": 124,
+      "y": 1540,
+      "hum": 0.6
+    },
+    {
+      "text": "THE LEGEND",
+      "from": 0,
+      "to": 2,
+      "size": 150,
+      "y": 800,
+      "style": "slam"
+    },
+    {
+      "text": "IS [BACK.]",
+      "from": 1,
+      "to": 2,
+      "size": 190,
+      "y": 990,
+      "style": "slam",
+      "hum": 0.6
+    }
+  ],
+  "hits": [
+    {
+      "at": 6,
+      "type": "jolt",
+      "amt": 1.0,
+      "dur": 0.5,
+      "speed": 0.7,
+      "shape": "hold"
+    },
+    {
+      "at": 8,
+      "type": "bulge",
+      "k": 0.7,
+      "dur": 0.3,
+      "att": 0.15
+    }
+  ],
+  "endcard": {
+    "logo": "input/test/logo.png",
+    "from": 12,
+    "to": 20,
+    "headline": "NEW HOME",
+    "subscribe": true,
+    "click": 16,
+    "glow_color": [
+      40,
+      150,
+      255
+    ]
+  },
+  "end": 20
+}
