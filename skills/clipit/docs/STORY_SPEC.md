@@ -34,8 +34,8 @@ Relative paths resolve from the folder you run the command in. Pass `--relative`
   "whisper": "turbo",         // speech model: "turbo" (fast) | "large" (OpenAI Whisper large-v3; needed for Hindi subtitles)
   "sfx": true,                // generated sound kit, auto-placed and levelled (docs/EFFECTS.md, "Sound effects")
 
-  "dialogue": [               // optional: spoken lines that play FIRST, timed by the words, not the beat
-    {"src": "input/panel.mp4", "start": 132.4, "end": 136.1},   // snapped to whole words; printed back to check
+  "dialogue": [               // optional: spoken lines that play FIRST, timed by the speech, not the beat
+    {"src": "input/panel.mp4", "start": 132.4, "end": 136.1},   // widened to whole sentences, cut in pauses; printed back
     {"src": "input/news.mp4", "start": 48.0, "end": 51.6, "look": "mono", "gap": 0.0}
   ],                          // the beat-timed shots below start where the dialogue ends; the music runs under it
 
@@ -100,7 +100,7 @@ Put it on a calm shot, such as `"speed": "hold"` with `"look": "poster"`.
  "follow": true, "rot": 90, "glow": 0.8, "glow_color": [0, 0, 0]},
 {"text": "LOOK AT ME", "from": 6, "to": 9, "style": "title", "anim": "assemble", "exit": "scatter", "behind": true}
 ```
-Voice shots and `dialogue` lines always run at normal speed (a speed you set on a voice shot is ignored, with a note), and never get jolts. For several lines in a row, prefer the `dialogue` list: it isn't squeezed onto the beat grid, so lines are never cut mid-word. Top-level `"voice_duck"` (−14 dB) sets how far the music dips under speech and `"caption_y"` (0.7) sets where captions sit. The first captioned run downloads the Whisper model once.
+Voice shots and `dialogue` lines always run at normal speed (a speed you set on a voice shot is ignored, with a note), and never get jolts. Their speech is never cut mid-sentence: dialogue lines are widened to whole sentences, and a voice shot's audio runs on under the next shot until its sentence ends. Subtitles appear only when the language is certain (see `docs/PLAYBOOK.md`). For several lines in a row, prefer the `dialogue` list: it isn't squeezed onto the beat grid, so lines are never cut mid-word. Top-level `"voice_duck"` (−14 dB) sets how far the music dips under speech and `"caption_y"` (0.7) sets where captions sit. The first captioned run downloads the Whisper model once.
 
 Hits can also carry `"sfx"` (a sound name or `null`). A `{"type": "gap", "at": 8, "db": -15}` hit dips the music right before beat 8, but use it only when asked: viewers hear it as the music cutting.
 

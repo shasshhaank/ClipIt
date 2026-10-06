@@ -15,7 +15,7 @@ For "they doubted him" stories, build the doubt out of real voices before the co
    - Read each printed line back. Keep it only if it is a complete thought that says what the story needs.
    - Headline flashes and dejected or lonely shots of him can follow as the first montage shots, in mono or dark, while the music is still in its quiet intro.
    - End on the harshest line.
-2. **The turn.** A dark last beat (a `black` hit, or a freeze frame with a `label` across the eyes), then the moment that answered them, landing on the drop. The music keeps playing; the dark beat does the work.
+2. **The turn.** A dark last beat (a `black` hit, or a slow-motion shot with a `label` across the eyes), then the moment that answered them, landing on the drop. The music keeps playing; the dark beat does the work.
 3. **The comeback (about 45–55%).**
    - Show the performance, the celebration and the proof (stats you verified), in full colour with velocity and jolts.
    - A strong move is a callback: echo one critic's line, then answer it with the result.
@@ -45,7 +45,7 @@ Studied from reference edits (a "mogged" meme edit, a wholesome lyric edit, and 
 - **Few cuts, all on the music.** Cuts land on the strong beats (the ones an editor would mark), not on every beat. Inside a shot, the rhythm comes from speed and push, not from effects.
 - **The same treatment on every clip.** One velocity ramp per clip (200% → 60% → 200%, eased like a water slide) and one gentle eased push toward the face. Editors copy the same keyframes onto every clip on purpose: consistency is what reads as "clean".
 - **Framed on the face, from the front.** The subject stays centred with the whole head in frame; pick clips where the face is visible and there is some movement, not extremes.
-- **Setup in real time, then the drop.** The setup plays at normal speed with its own sound (a quote, a meme moment). One beat before the drop the frame freezes, goes black and white and gets a label (e.g. a red bar reading MOGGED across the eyes). On the drop: a hard cut to the best clean footage, in colour.
+- **Setup in real time, then the drop.** The setup plays at normal speed with its own sound (a quote, a meme moment). One beat before the drop the frame goes black and white and gets a label (e.g. a red bar reading MOGGED across the eyes); the reference freezes here, but keep it in slow motion unless a freeze is asked for, since frozen frames read as stills. On the drop: a hard cut to the best clean footage, in colour.
 - **Dark blinks, not flashes.** Between shots there is at most a dip to black for a frame or two.
 - **A clean close.** A slow push on a hero close-up, then a fade to black while the music fades.
 - **Text is small and in time.** Dialogue text is small (about 4% of the frame width tall), white with a soft glow and shadow, one key word in red, revealed word by word exactly as it's spoken, fading out before the next line.
@@ -63,7 +63,7 @@ Effects follow the same rule: a whip only when the subject or camera moves that 
 
 ## Flowing cuts
 A hard cut between unrelated shots, or a jump cut in a talking clip, breaks the flow. Every cut is one of these instead (automatic in `talk`, `edit` and `story`):
-- **Focus-hunting cut** (`focus` hit). Studied from explainer-style motion graphics: the old shot racks soft over the last 0.1–0.2 s, the cut happens while everything is blurred, then the new shot hunts for focus (nearly sharp, briefly soft again, then sharp) over 0.3–0.45 s, the frame breathing a touch as focus moves. Use the full, slow version between dialogue lines and quiet shots, and a quick one on beat cuts, so the hit still lands on the beat.
+- **Focus-hunting cut** (`focus` hit). Studied from explainer-style motion graphics: the old shot racks soft over the last 0.1–0.2 s, the cut happens while everything is blurred, then the new shot hunts for focus (nearly sharp, briefly soft again, then sharp) over 0.3–0.45 s, the frame breathing a touch as focus moves. Use it between dialogue lines and on longer, calmer shots. On fast beat cuts (shots under 1.5 s) a hunt would blur a third of every shot and the montage turns into smeared stills, so those get a zoom cut instead.
 - **Zoom cut** (`zoomcut` hit). The old shot pushes in over the last 0.1 s, the new shot lands pushed in and eases back over 0.3 s, so the motion carries across the cut. The default for silence trims in talking clips, where it also alternates wide and tight framing like a two-camera shoot.
 Choose with `"cuts": "focus" | "zoom" | "hard"` in a spec (or `--cuts` for `talk`), and per shot with `"cut"`.
 
@@ -77,8 +77,15 @@ A 9:16 crop of 16:9 footage is only 56% of its width, so a close-up head is ofte
 
 ## Dialogue that syncs and makes sense
 - Speech always plays at normal speed with its own sound. Dialogue shots never get speed ramps, jolts or stepped fps.
-- Lines are cut on whole words (the `dialogue` list snaps your start and end to the transcript) and should be whole sentences; `story` warns when a line stops mid-sentence.
+- **Nobody is cut off.** Every spoken line (dialogue lists, talk clips, hooks) is widened to whole sentences and cut inside real pauses in the audio: the start goes back to the pause before the sentence (0.25 s or longer), the end forward to the pause after it (0.3 s or longer). With a certain transcript, Whisper's sentence segments lead; otherwise only the audio is used. A voice shot inside the montage keeps talking under the next shot until its sentence ends (an L-cut).
+- Choose short, complete lines; when `story` reports that a line was widened a lot, pick a shorter one.
 - Read every printed line back against the user's story before rendering. A line that doesn't say what the story needs, or only says it out of context, goes.
+
+## Subtitles: only when the language is certain
+- The spoken language is measured before transcribing, over several stretches of the speech. Subtitles appear only at 80%+ confidence and with a model that handles the language. Hindi and Urdu count as one language, and Hindi that's clearly present (25%+, as in Hinglish commentary) makes the clip Hindi.
+- Whisper is always told which language to write, so it never turns Hindi speech into English text. With an unsure or mixed language, or Hindi on the fast model, there are no subtitles at all.
+- Hindi subtitles need OpenAI Whisper's full model; ask the user once whether to install it (`install.sh --with-hindi`) or go without.
+- Without subtitles, the meaning travels in a few English core-word cards (`title` or `slam`: KING IS BACK, GANGSTERS DON'T STOP) and, at a key moment, a `poster` frame.
 - Dialogue comes before the montage: the lines play first, timed by the words, and the beat-timed montage starts where they end. The song starts earlier so it runs under the lines, ducked.
 
 ## Music that never cuts

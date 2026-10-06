@@ -144,6 +144,61 @@ def looks_like_slideshow(src, t0, t1, n=4):
     return bool(r) and float(np.median(r)) < SLIDESHOW_RATIO
 
 
+def looks_still(src, t0, t1):
+    """True when the picture doesn't change at all across a window: a frozen frame or a still-image upload.
+    (A photo with a slow zoom on it can't be told apart from calm footage reliably, so vet sources on the sheet.)"""
+    cap = cv2.VideoCapture(src)
+    frames = []
+    for t in np.linspace(t0, t1, 4):
+        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+        ok, f = cap.read()
+        if ok:
+            frames.append(cv2.cvtColor(cv2.resize(f, (160, 90)), cv2.COLOR_BGR2GRAY).astype(np.float32))
+    cap.release()
+    return len(frames) > 1 and max(float(np.abs(a - b).mean()) for a, b in zip(frames, frames[1:])) < 0.5
+
+
+STILL_ON_SCREEN = 4.0   # below this a shot reads as a still picture (calibrated on shots viewers called "a slideshow")
+
+
+def action_window(src, src_in, span, prof, out_len, lo, hi, step=0.25):
+    """(src_in, score): the start, within [lo, hi - span], where the shot shows the most movement ON SCREEN at its
+    speed, and that score (median picture change per 0.25 s of output, on a small greyscale copy). Calm moments
+    slowed down score low and read as a slideshow; the search moves the window onto the action in the same scene."""
+    from .render import remap_table
+    cap = cv2.VideoCapture(src)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    a, b = max(lo, src_in - 2.5), min(hi, src_in + span + 2.5)
+    cap.set(cv2.CAP_PROP_POS_MSEC, a * 1000)
+    keep = max(1, int(round(fps / 12)))
+    times, frames, k = [], [], 0
+    while True:
+        t = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000
+        if t > b or not cap.grab():
+            break
+        if k % keep == 0:
+            _, f = cap.retrieve()
+            frames.append(cv2.GaussianBlur(cv2.cvtColor(cv2.resize(f, (160, 90)), cv2.COLOR_BGR2GRAY).astype(np.float32), (3, 3), 0))
+            times.append(t)
+        k += 1
+    cap.release()
+    if len(frames) < 3:
+        return src_in, 0.0
+    times = np.array(times)
+    u, v, _, _ = remap_table(prof)
+    rel = np.interp(np.arange(0.05, out_len - 0.05, step) / out_len, u, v) * span   # source offsets the shot shows
+
+    def score(s0):
+        idx = [int(np.argmin(np.abs(times - (s0 + r)))) for r in rel]
+        d = [float(np.abs(frames[i] - frames[j]).mean()) for i, j in zip(idx, idx[1:])]
+        return float(np.median(d)) if d else 0.0
+    best = (score(src_in), src_in)
+    for s0 in np.arange(a, max(a, min(hi, b) - span) + 1e-6, 0.25):
+        best = max(best, (score(float(s0)), float(s0)))
+    here = score(src_in)
+    return (best[1], best[0]) if best[0] > max(1.25 * here, STILL_ON_SCREEN) else (src_in, here)
+
+
 def shots(src, info, sample_fps=6, scene_thresh=27.0):
     """Detect shots and score each by motion intensity (for velocity edits). Shots with the photo
     slideshow layout are marked `slideshow` and should never be used."""

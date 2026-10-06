@@ -227,10 +227,10 @@ def cmd_edit(a):
     wd = work(a.videos[0])
     hook = None
     if a.hook_start is not None:
-        from clipper.transcribe import captions_ok, transcribe, words_in
+        from clipper.transcribe import captions_ok, snap_speech, transcribe, words_in
         tr = transcribe(a.videos[0], wd, model=a.whisper, language=a.lang)
-        hook = {"src": a.videos[0], "start": a.hook_start, "end": a.hook_end,
-                "words": words_in(tr["words"], a.hook_start, a.hook_end) if captions_ok(tr) else []}
+        h0, h1, _ = snap_speech(a.videos[0], a.hook_start, a.hook_end, tr)   # the hook line is never cut mid-sentence
+        hook = {"src": a.videos[0], "start": h0, "end": h1, "words": words_in(tr["words"], h0, h1) if captions_ok(tr) else []}
     shot_list = json.load(open(a.shots)) if a.shots else None
     plan = planner.edit_plan(a.videos, a.music, wd, length=a.length, music_start=a.music_start, hook=hook,
                              look=a.look, letterbox=a.letterbox, level=a.level,

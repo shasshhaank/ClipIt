@@ -15,7 +15,7 @@ from . import assets
 from . import audio as A
 from .beats import analyze
 from .media import load_audio, probe, save_audio
-from .moments import looks_like_slideshow
+from .moments import STILL_ON_SCREEN, action_window, looks_like_slideshow, looks_still
 from .planner import _track, fit, lv
 from .render import remap_table
 
@@ -91,6 +91,15 @@ class Beats:
 
 
 _SCENES = {}
+_ACTIVE = {}
+
+
+def active_moments(src, n=4):
+    """The most active moments of a source (seconds), strongest first: where to look for footage that moves."""
+    if src not in _ACTIVE:
+        from .moments import shots
+        _ACTIVE[src] = [s["peak"] for s in sorted(shots(src, probe(src)), key=lambda x: -x["motion"]) if not s["slideshow"]]
+    return _ACTIVE[src][:n]
 
 
 def scene_cuts(src, workdir):
@@ -109,17 +118,22 @@ def scene_cuts(src, workdir):
     return cuts
 
 
+def _scene(src, t, dur, workdir, guard=True):
+    """(start, end) of the scene that contains source second t."""
+    lo, hi = 0.0, dur
+    for c in scene_cuts(src, workdir) if guard else []:
+        if c <= t:
+            lo = c + 0.04
+        else:
+            hi = c - 0.04
+            break
+    return lo, hi
+
+
 def _fit(src, peak, span, dur, workdir, guard=True):
     """Centre the source window on `peak`, but keep it inside the scene that contains the peak,
     so speed-ups never spill across a cut into unrelated footage."""
-    lo, hi = 0.0, dur
-    if guard:
-        for c in scene_cuts(src, workdir):
-            if c <= peak:
-                lo = c + 0.04
-            else:
-                hi = c - 0.04
-                break
+    lo, hi = _scene(src, peak, dur, workdir, guard)
     if hi - lo < span:
         print(f"  ! {os.path.basename(src)} @ {peak:.2f}s: scene is {hi - lo:.2f}s but the shot needs "
               f"{span:.2f}s of source - it will cross a cut. Use a slower speed, a shorter shot or another peak.")
@@ -167,54 +181,50 @@ def readable(texts, end, opts=None):
               f"let the footage and the music carry the rest.")
 
 
-def snap_line(words, s0, s1):
-    """Widen a soundbite [s0, s1] to whole words: never start or stop inside a word, keep a breath of room on
-    each side without catching a piece of the neighbouring words. Returns (start, end, words, ends_sentence)."""
-    inside = [w for w in words if w["e"] > s0 + 0.03 and w["s"] < s1 - 0.03]
-    if not inside:
-        return s0, s1, [], True
-    i0, i1 = words.index(inside[0]), words.index(inside[-1])
-    before = words[i0 - 1]["e"] if i0 > 0 else 0.0
-    after = words[i1 + 1]["s"] if i1 + 1 < len(words) else inside[-1]["e"] + 1.0
-    start = max(inside[0]["s"] - 0.12, (before + inside[0]["s"]) / 2)
-    end = min(inside[-1]["e"] + 0.2, (inside[-1]["e"] + after) / 2)
-    done = inside[-1]["w"].rstrip().endswith((".", "?", "!")) or after - inside[-1]["e"] > 0.35
-    return start, end, inside, done
+def _speech(spec, src, workdir):
+    """The transcript of a source (None when no speech model is installed)."""
+    try:
+        from .transcribe import transcribe
+    except ImportError:
+        return None
+    try:
+        return transcribe(src, os.path.join(workdir, "tr_" + os.path.splitext(os.path.basename(src))[0]),
+                          model=spec.get("whisper"))
+    except ImportError:
+        print("  ! no speech model installed: lines are cut on pauses in the audio and get no subtitles")
+        return None
 
 
 def _dialogue(spec, P, workdir, edge):
-    """The dialogue intro: whole spoken lines played in order at normal speed, timed by the words, not the beat.
+    """The dialogue intro: whole spoken lines played in order at normal speed, timed by the speech, not the beat.
+    Every line is widened to whole sentences and cut in real pauses. Subtitles only when the language is certain.
     Returns (shots, voices, caption words, length)."""
+    from .transcribe import line_ok, snap_speech, words_in
     shots, voices, cap, t = [], [], [], 0.0
     for d in spec.get("dialogue", []):
         src = P(d["src"])
-        s0, s1, words, done = d["start"], d["end"], [], True
-        try:
-            from .transcribe import captions_ok, transcribe
-            tr = transcribe(src, os.path.join(workdir, "tr_" + os.path.splitext(os.path.basename(src))[0]),
-                            model=spec.get("whisper"))
-            s0, s1, words, done = snap_line(tr["words"], s0, s1)
-            if not captions_ok(tr):
-                d = dict(d, captions=False)
-        except ImportError:
-            print("  ! no transcription available: dialogue keeps the given times and gets no captions")
+        tr = _speech(spec, src, workdir)
+        s0, s1, clean = snap_speech(src, d["start"], d["end"], tr)
         span = s1 - s0
-        text = " ".join(w["w"] for w in words)
-        print(f'  dialogue {os.path.basename(src)} {s0:.2f}-{s1:.2f}s: "{text}"')
-        if not done:
-            print("  ! that line stops mid-sentence; widen `end` to the end of the sentence or pick another line")
-        tr = _track(src, s0, s1)
-        fz, zoom = fit(tr, d.get("zoom", [1.0, 1.04]))
+        subs = bool(tr) and d.get("captions", True) and line_ok(tr, src, s0, s1)
+        words = words_in(tr["words"], s0, s1) if subs else []
+        said = f'"{" ".join(w["w"] for w in words)}"' if subs else "(no subtitles: the language isn't certain or needs the full model)"
+        print(f"  dialogue {os.path.basename(src)} {s0:.2f}-{s1:.2f}s {said}")
+        if s1 - d["end"] > 1.5 or d["start"] - s0 > 1.5:
+            print(f"  ! widened from {d['start']}-{d['end']} so the sentence isn't cut; pick a shorter line if this is too long")
+        if not clean:
+            print("  ! no clear pause at one end of that line; check it on playback, or pick another line")
+        tr_v = _track(src, s0, s1)
+        fz, zoom = fit(tr_v, d.get("zoom", [1.0, 1.04]))
         shot = {"src": src, "out": [t, t + span], "src_in": s0, "src_span": span, "profile": {"type": "const", "speed": 1.0},
-                "zoom": zoom, "fit_z": fz, "track": tr, "layout": d.get("layout", "fill"), "voice": True,
-                "captions": bool(words) and d.get("captions", True), "edge": d.get("edge", edge)}
+                "zoom": zoom, "fit_z": fz, "track": tr_v, "layout": d.get("layout", "fill"), "voice": True,
+                "captions": bool(words), "edge": d.get("edge", edge)}
         for key in ("look", "fx", "cx", "cy"):
             if key in d:
                 shot[key] = d[key]
         shots.append(shot)
         voices.append((src, s0, span, t))
-        if shot["captions"]:
-            cap += [dict(w, s=w["s"] - s0 + t, e=w["e"] - s0 + t) for w in words]
+        cap += [dict(w, s=w["s"] - s0 + t, e=w["e"] - s0 + t) for w in words]
         t += span + d.get("gap", 0.0)
     return shots, voices, cap, t
 
@@ -253,6 +263,17 @@ def build(spec, workdir, base_dir="."):
         src_in = _fit(src, peak, span, dur, workdir, spec.get("guard_cuts", True))
         if "start" in s:   # exact source second, e.g. where a soundbite begins
             src_in = float(np.clip(s["start"], 0, max(0, dur - span)))
+        elif not s.get("voice") and s.get("speed") not in ("hold", "freeze") and s.get("look") != "poster":
+            # keep the shot on the action: slow motion of a calm moment barely changes on screen and reads as a still
+            lo, hi = _scene(src, src_in, dur, workdir, spec.get("guard_cuts", True))
+            moved, life = action_window(src, src_in, span, prof, o1 - o0, lo, hi)
+            if abs(moved - src_in) > 0.05:
+                print(f"  shot {s['from']}..{s['to']}: moved to source {moved:.2f}s, where it shows more movement")
+                src_in = moved
+            if life < STILL_ON_SCREEN:
+                print(f"  ! shot {s['from']}..{s['to']} barely moves on screen ({life:.1f}): it reads as a still. Pick a "
+                      f"moment with action, or play it faster (\"normal\" or \"velocity\") or shorter. Most active "
+                      f"moments in this clip: {', '.join(f'{x:.1f}s' for x in active_moments(src))}")
         shot = {"src": src, "out": [o0, o1], "src_in": src_in, "src_span": span, "profile": prof,
                 "zoom": s.get("zoom", [1.0, 1.1]), "layout": s.get("layout", "fill"), "captions": False,
                 "voice": bool(s.get("voice")), "edge": s.get("edge", edge)}
@@ -305,21 +326,27 @@ def build(spec, workdir, base_dir="."):
             shot["fit_z"], shot["zoom"] = fit(shot["track"], shot["zoom"])
         if min(prof.get("speed", 1), prof.get("lo", 1)) < 0.6 and "interp" not in shot:
             shot["interp"] = spec.get("slowmo_interp", "flow")
-        if s.get("voice"):   # a soundbite: the shot plays its own speech and the music ducks under it
-            voices.append((src, src_in, span, o0))
-            if s.get("captions"):   # word-by-word captions of what is said (first run downloads Whisper)
-                from .transcribe import captions_ok, transcribe, words_in
-                tr = transcribe(src, os.path.join(workdir, "tr_" + os.path.splitext(os.path.basename(src))[0]),
-                                model=spec.get("whisper"))
-            if s.get("captions") and captions_ok(tr):
+        if s.get("voice"):   # a soundbite: its own speech, music ducked; the voice runs on under the next shot
+            from .transcribe import line_ok, snap_speech, words_in   # until the sentence ends (an L-cut)
+            tr = _speech(spec, src, workdir)
+            heard = max(span, snap_speech(src, src_in, src_in + span, tr)[1] - src_in)
+            if heard > span + 0.05:
+                print(f"  shot {s['from']}..{s['to']}: the speech runs {heard - span:.1f}s past the cut so the sentence finishes")
+            voices.append((src, src_in, heard, o0))
+            if s.get("captions") and tr and line_ok(tr, src, src_in, src_in + heard):
                 cap_words += [dict(w, s=w["s"] - src_in + o0, e=w["e"] - src_in + o0)
-                              for w in words_in(tr["words"], src_in, src_in + span)]
+                              for w in words_in(tr["words"], src_in, src_in + heard)]
                 shot["captions"] = True
         print(f"  shot {s['from']:>6}..{s['to']:<6} {os.path.basename(src)}  src {src_in:.2f}-{src_in + span:.2f}s "
               f"({prof['type']})")
         if looks_like_slideshow(src, src_in, src_in + span):
             print(f"  ! shot {s['from']}..{s['to']} looks like a photo slideshow (sharp picture between blurred sides). "
                   f"Use real video footage instead.")
+        elif sp in ("freeze", "hold") and s.get("look") != "poster":
+            print(f"  ! shot {s['from']}..{s['to']} is a freeze frame; it reads as a still picture. Use slow motion "
+                  f"unless the user asked for a freeze.")
+        elif not s.get("voice") and looks_still(src, src_in, src_in + max(span, 0.5)):
+            print(f"  ! shot {s['from']}..{s['to']} looks like a still picture (nothing moves). Use footage with movement.")
         shots.append(shot)
 
     # ------------------------------------------------------------ texts & images
@@ -332,7 +359,8 @@ def build(spec, workdir, base_dir="."):
             sh = next((x for x in shots if x["out"][0] <= st["t0"] < x["out"][1]), shots[-1])
             tr = sh["track"]
             fo = st["follow"] if isinstance(st["follow"], dict) else {}
-            st["follow_track"] = dict(tr, src=sh["src"], dx=fo.get("dx", 0), dy=fo.get("dy", -260))
+            st["follow_track"] = dict(t=tr["t"], x=tr["ex"], y=tr["ey"], src=sh["src"],   # rides on the eyes
+                                      dx=fo.get("dx", 0), dy=fo.get("dy", -260))
         texts.append(st)
     for im in spec.get("images", []):
         d = {k: v for k, v in im.items() if k not in ("from", "to")}
@@ -419,6 +447,9 @@ def build(spec, workdir, base_dir="."):
         hits.append(d)
     L = spec.get("level", 6)   # edit level: 1 barely edited, 5 clean, 10 hyper
     posters = [(tx["t0"], tx["t1"]) for tx in texts if tx.get("kind") == "poster"]
+    for sh, s in zip(shots[len(shots) - len(spec["shots"]):], sorted(spec["shots"], key=lambda x: x["from"])):
+        if "edge" not in s and any(sh["out"][0] < b and sh["out"][1] > a for a, b in posters):
+            sh["edge"] = "blur"   # calm, blurred fill behind a poster, never mirrored copies of a face
     if len(posters) > (1 if END < 20 else 2):
         print(f"  ! {len(posters)} poster frames in {END:.0f}s - keep it to {1 if END < 20 else 2}; they only land when rare.")
     for o in [tx for tx in texts if tx.get("kind") != "poster"] + images:   # the renderer hides these under a poster
@@ -433,6 +464,9 @@ def build(spec, workdir, base_dir="."):
         for i, (c, sh) in enumerate(cuts):
             kind = sh.get("cut", style)
             dialogue = sh.get("voice") or c <= intro + 1e-3   # cuts between spoken lines get the slow, full hunt
+            prev = shots[shots.index(sh) - 1]
+            if kind == "focus" and not dialogue and min(sh["out"][1] - c, c - prev["out"][0]) < 1.5:
+                kind = "zoom"   # fast beat cuts stay sharp: a zoom cut, not a blurry hunt on a short shot
             if kind == "focus":
                 hits.append({"t": c, "type": "focus", "amt": 1.0, "att": 0.2 if dialogue else 0.1,
                              "dur": 0.45 if dialogue else 0.3, "px": 16 if dialogue else 11})

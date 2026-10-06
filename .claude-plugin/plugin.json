@@ -1,7 +1,7 @@
 {
   "name": "clipit",
   "displayName": "ClipIt",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Turn long videos into short-form clips and clean, beat-synced fan edits (9:16): synced dialogue, flowing cuts, face-safe framing, flow slow-mo and seamless music.",
   "author": {"name": "Shashank Pandey", "url": "https://shashankpandey.com"},
   "homepage": "https://github.com/shasshhaank/ClipIt",

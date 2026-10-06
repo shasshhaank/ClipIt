@@ -100,12 +100,15 @@ def extract_audio(src, dst, sr=44100, mono=False):
     return dst
 
 
-def load_audio(path, sr=44100, mono=False):
-    """Decode any audio/video file to float32 numpy (channels, samples), on the video's clock."""
+def load_audio(path, sr=44100, mono=False, start=None, dur=None):
+    """Decode any audio/video file (or the part from `start` for `dur` s) to float32 numpy (channels, samples),
+    on the video's clock."""
     ch = 1 if mono else 2
+    seek = ["-ss", f"{max(0.0, start):.3f}"] if start is not None else []
+    span = ["-t", f"{dur:.3f}"] if dur is not None else []
     raw = subprocess.run(
-        [FFMPEG, "-v", "error", "-i", path, "-vn", *_align(path), "-ac", str(ch), "-ar", str(sr), "-f", "f32le", "-"],
-        capture_output=True, check=True).stdout
+        [FFMPEG, "-v", "error", *seek, "-i", path, *span, "-vn", *_align(path), "-ac", str(ch), "-ar", str(sr),
+         "-f", "f32le", "-"], capture_output=True, check=True).stdout
     return np.frombuffer(raw, dtype=np.float32).reshape(-1, ch).T.copy()
 
 

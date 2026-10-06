@@ -14,7 +14,7 @@ from .beats import analyze, choose_window
 from .media import load_audio, probe, save_audio
 from .moments import POLAR, shots as detect_shots
 from .render import remap_table
-from .transcribe import captions_ok, words_in
+from .transcribe import captions_ok, snap_speech, words_in
 
 SR = A.SR
 
@@ -45,6 +45,12 @@ def lv(level, on):
 # =================================================================== TALK CLIP
 def talk_plan(src, start, end, transcript, workdir, music=None, music_start=None, layout="fill",
               title=None, look="punchy", trim_silence=True, music_db=-20, level=5, cuts="zoom", captions=True):
+    s0, s1, clean = snap_speech(src, start, end, transcript)   # never start or stop mid-sentence
+    if abs(s0 - start) > 0.3 or abs(s1 - end) > 0.3:
+        print(f"  clip moved to {s0:.2f}-{s1:.2f}s so it starts and ends on whole sentences")
+    if not clean:
+        print("  ! no clear pause at one end of the clip; check the first and last words on playback")
+    start, end = s0, s1
     words = words_in(transcript["words"], start, end)
     # --- keep-ranges: cut pauses > 0.45 s down to ~0.12 s (jump cuts keep pace)
     ranges = []
@@ -238,8 +244,12 @@ def edit_plan(sources, music, workdir, length=15.0, music_start=None, hook=None,
     # ---- hits (effects choreography): every cut flows, extras switch on with the level (see lv())
     for c in bounds[1:-1]:
         on_down = round(c, 3) in downs
-        if lv(level, 2):   # a quick focus-hunting cut, so the change of shot doesn't jar
-            hits.append({"t": c, "type": "focus", "amt": 1.0, "att": 0.1, "dur": 0.3, "px": 11})
+        if lv(level, 2):   # every cut flows: a sharp zoom cut on quick beat cuts, a focus hunt between longer shots
+            i = bounds.index(c)
+            if min(c - bounds[i - 1], bounds[i + 1] - c) < 1.5:
+                hits.append({"t": c, "type": "zoomcut", "amt": 1.0, "att": 0.08, "dur": 0.25, "scale": 0.08})
+            else:
+                hits.append({"t": c, "type": "focus", "amt": 1.0, "att": 0.1, "dur": 0.3, "px": 11})
         if on_down and lv(level, 5):   # the old shot dips toward dark into a bar-line cut (a blink)
             hits.append({"t": c, "type": "black", "amt": 0.45 * lv(level, 5), "dur": 0.0001, "att": 0.12, "shape": "hold"})
         if on_down and c > drop + 0.1 and lv(level, 7):   # a short jolt on bar lines after the drop
