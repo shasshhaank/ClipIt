@@ -1,0 +1,12 @@
+{
+  "name": "clipit",
+  "description": "ClipIt: a video clipping and editing skill for Claude Code.",
+  "owner": {"name": "Shashank Pandey", "url": "https://shashankpandey.com"},
+  "plugins": [
+    {
+      "name": "clipit",
+      "source": ".",
+      "description": "Turn long videos into short-form clips and clean, beat-synced fan edits (9:16)."
+    }
+  ]
+}

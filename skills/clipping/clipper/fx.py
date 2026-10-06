@@ -12,10 +12,10 @@ OUT_W, OUT_H = 1080, 1920
 
 # ---------------------------------------------------------------- camera / framing
 def camera(frame, cx, cy, zoom=1.0, rot=0.0, dx=0.0, dy=0.0, out_w=OUT_W, out_h=OUT_H, fill="blur", sy=1.0):
-    """Crop a 9:16 window centred on (cx, cy) (normalised source coords), apply zoom (>1 = closer),
-    rotation (deg), pixel shake offsets and a vertical stretch `sy` (about the frame centre), in ONE
-    affine warp. If the source can't fill the window (e.g. zoomed-out vertical letterbox), the
-    background is a blurred copy."""
+    """Crop a 9:16 window centred on (cx, cy) (normalised source coords), apply zoom (>1 = closer, <1 = the
+    picture smaller than the frame), rotation (deg), pixel shake offsets and a vertical stretch `sy` (about the
+    frame centre), in ONE affine warp. Where the window runs past the picture, `fill` decides what shows:
+    "reflect" mirrored copies (motion tile), "blur" a blurred, darkened copy, else the edge pixels repeated."""
     h, w = frame.shape[:2]
     target_ar = out_w / out_h
     # base crop that fills the output at zoom 1
@@ -36,6 +36,12 @@ def camera(frame, cx, cy, zoom=1.0, rot=0.0, dx=0.0, dy=0.0, out_w=OUT_W, out_h=
     if abs(sy - 1) > 1e-3:
         M[1] *= sy
         M[1, 2] += out_h / 2 * (1 - sy)
+    if fill == "blur" and (crop_h > h + 1 or crop_w > w + 1):   # picture smaller than the frame: blurred surround
+        bg = cv2.GaussianBlur(camera(frame, cx, cy, 1.0, out_w=out_w // 4, out_h=out_h // 4, fill="replicate"), (0, 0), 6)
+        bg = (cv2.resize(bg, (out_w, out_h)) * 0.55).astype(np.uint8)
+        fg = cv2.warpAffine(frame, M, (out_w, out_h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        m = cv2.warpAffine(np.full((h, w), 255, np.uint8), M, (out_w, out_h), flags=cv2.INTER_LINEAR)[..., None] / 255.0
+        return (fg * m + bg * (1 - m)).astype(np.uint8)
     border = cv2.BORDER_REFLECT101 if fill == "reflect" else cv2.BORDER_REPLICATE
     return cv2.warpAffine(frame, M, (out_w, out_h), flags=cv2.INTER_LINEAR, borderMode=border)
 
@@ -58,6 +64,20 @@ def fit_with_blur_bg(frame, out_w=OUT_W, out_h=OUT_H):
 
 
 # ---------------------------------------------------------------- hit effects
+def lens_blur(frame, radius):
+    """Out-of-focus lens: a disc-shaped blur (round bokeh, like a real defocus), radius in output px."""
+    if radius < 0.6:
+        return frame
+    h, w = frame.shape[:2]
+    small = cv2.resize(frame, (w // 2, h // 2), interpolation=cv2.INTER_AREA)
+    r = max(1.0, radius / 2)
+    n = int(np.ceil(r)) * 2 + 1
+    yy, xx = np.mgrid[:n, :n] - n // 2
+    k = np.clip(r + 0.5 - np.hypot(xx, yy), 0, 1).astype(np.float32)   # anti-aliased disc
+    out = cv2.filter2D(small, -1, k / k.sum(), borderType=cv2.BORDER_REFLECT101)
+    return cv2.resize(out, (w, h), interpolation=cv2.INTER_LINEAR)
+
+
 def flash(frame, amt, color=(255, 255, 255)):
     if amt <= 0.01:
         return frame
@@ -160,6 +180,11 @@ class Look:
         "hdr": dict(contrast=1.07, sat=1.05, shadow=(4, 2, 0), high=(-4, 0, 4), grain=0.0, vig=0.2,
                     sharp=0.5, clarity=0.7, clarity_r=24, vib=0.16, bright=4, gamma=0.92, glow=0.2, glow_thr=0.83,
                     shadow_lift=0.12),
+        # wholesome / feel-good: bright and airy, rich but soft colour, glowing highlights (tears and eyes catch
+        # the light), lifted shadows, warm-pink highlights
+        "bright": dict(contrast=1.04, sat=1.2, shadow=(6, 2, 0), high=(-6, 2, 10), grain=0.0, vig=0.08,
+                       sharp=0.45, clarity=0.35, clarity_r=16, vib=0.3, bright=12, gamma=0.9, glow=0.3, glow_thr=0.7,
+                       shadow_lift=0.15),
     }
 
     def __init__(self, name="punchy", w=OUT_W, h=OUT_H, seed=7):

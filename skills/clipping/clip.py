@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""claude-clipper CLI.
+"""ClipIt CLI.
 
   doctor                               check ffmpeg / python deps / yt-dlp / fonts
   find "QUERY" [--n 8]                 research footage: list YouTube candidates (title, channel, length, size); no download
@@ -70,11 +70,16 @@ def _has(module):
 
 
 def cmd_doctor(a):
-    ok = True
-    for b in ("ffmpeg", "ffprobe"):
-        p = shutil.which(b)
-        print(f"{b:10s} {'OK ' + p if p else 'MISSING (brew install ffmpeg / apt install ffmpeg)'}")
-        ok &= bool(p)
+    from clipper.media import FFMPEG, FFPROBE
+    from clipper.reframe import MODEL
+    try:
+        ver = subprocess.run([FFMPEG, "-version"], capture_output=True, text=True).stdout.split("\n")[0][:40]
+        print(f"{'ffmpeg':10s} OK {shutil.which(FFMPEG) or FFMPEG} ({ver})")
+        ok = True
+    except OSError:
+        print(f"{'ffmpeg':10s} MISSING (run install.sh: it adds a bundled ffmpeg, no Homebrew needed)")
+        ok = False
+    print(f"{'ffprobe':10s} {'OK ' + FFPROBE if FFPROBE else 'not found (fine: ffmpeg is used to read files instead)'}")
     for mod in ("numpy", "cv2", "librosa", "scenedetect", "PIL", "pyloudnorm", "scipy"):
         try:
             __import__(mod)
@@ -82,17 +87,12 @@ def cmd_doctor(a):
         except Exception as e:
             ok = False
             print(f"{mod:10s} MISSING ({e})")
-    try:
-        import cv2
-        has = os.path.exists(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        print(f"{'faces':10s} {'OK' if has else 'MISSING (pip install \"opencv-python<5\")'}")
-    except Exception:
-        pass
+    print(f"{'faces':10s} " + ("OK (YuNet)" if os.path.exists(MODEL) else "basic (models/ is missing, using Haar)"))
     whisper = "mlx" if _has("mlx_whisper") else "faster-whisper" if _has("faster_whisper") else None
     print(f"{'whisper':10s} " + (f"OK ({whisper})" if whisper else
                                  "MISSING (pip install mlx-whisper on Apple Silicon, else faster-whisper)"))
     print(f"{'cutout':10s} " + ("OK (optional)" if _has("rembg") else
-                                "not installed (optional: bash install.sh --with-cutout)"))
+                                "not installed (optional; only offer it when text-behind or rim light is asked for)"))
     ytdlp = _has("yt_dlp")
     print(f"{'yt-dlp':10s} " + ("OK" if ytdlp else "MISSING (pip install yt-dlp)"))
     ok = ok and bool(whisper) and ytdlp
@@ -112,7 +112,7 @@ def cmd_analyze(a):
     print(json.dumps(info))
     res = {"info": info}
     if info["has_audio"] and not a.no_transcript:
-        tr = transcribe(a.video, wd, language=a.lang)
+        tr = transcribe(a.video, wd, model=a.whisper, language=a.lang)
         mono = load_audio(os.path.join(wd, "speech16k.wav"), 16000, mono=True)[0]
         res["moments"] = moments.speech_candidates(tr, mono, 16000, a.min, a.max)
         res["hooks"] = moments.hook_lines(tr)
@@ -216,10 +216,10 @@ def cmd_fetch(a):
 def cmd_talk(a):
     from clipper.transcribe import transcribe
     wd = work(a.video)
-    tr = transcribe(a.video, wd, language=a.lang)
+    tr = transcribe(a.video, wd, model=a.whisper, language=a.lang)
     plan = planner.talk_plan(a.video, a.start, a.end, tr, wd, music=a.music, music_start=a.music_start,
                              layout=a.layout, title=a.title, look=a.look, trim_silence=not a.no_trim,
-                             music_db=a.music_db, level=a.level)
+                             music_db=a.music_db, level=a.level, cuts=a.cuts, captions=not a.no_captions)
     render(plan, a.out or outpath(f"{os.path.basename(wd)}_talk_{int(a.start)}.mp4"), wd)
 
 
@@ -227,10 +227,10 @@ def cmd_edit(a):
     wd = work(a.videos[0])
     hook = None
     if a.hook_start is not None:
-        from clipper.transcribe import transcribe, words_in
-        tr = transcribe(a.videos[0], wd, language=a.lang)
+        from clipper.transcribe import captions_ok, transcribe, words_in
+        tr = transcribe(a.videos[0], wd, model=a.whisper, language=a.lang)
         hook = {"src": a.videos[0], "start": a.hook_start, "end": a.hook_end,
-                "words": words_in(tr["words"], a.hook_start, a.hook_end)}
+                "words": words_in(tr["words"], a.hook_start, a.hook_end) if captions_ok(tr) else []}
     shot_list = json.load(open(a.shots)) if a.shots else None
     plan = planner.edit_plan(a.videos, a.music, wd, length=a.length, music_start=a.music_start, hook=hook,
                              look=a.look, letterbox=a.letterbox, level=a.level,
@@ -425,7 +425,9 @@ def main():
     p.add_argument("--max-minutes", type=float, help="skip videos longer than this")
     p.add_argument("--res", type=int, default=1080, help="height the size estimate assumes")
     p.add_argument("--no-sizes", action="store_true", help="skip the per-video size lookup (faster)")
-    p = sp.add_parser("analyze"); p.add_argument("video"); p.add_argument("--lang")
+    whisper = dict(default=None, choices=["turbo", "large"],
+                   help="speech model: turbo (fast, default) or large (OpenAI Whisper large-v3; needed for Hindi)")
+    p = sp.add_parser("analyze"); p.add_argument("video"); p.add_argument("--lang"); p.add_argument("--whisper", **whisper)
     p.add_argument("--min", type=float, default=18); p.add_argument("--max", type=float, default=55)
     p.add_argument("--shots", action="store_true"); p.add_argument("--no-transcript", action="store_true")
     p = sp.add_parser("sheet"); p.add_argument("video"); p.add_argument("--times"); p.add_argument("--n", type=int, default=30)
@@ -436,6 +438,8 @@ def main():
     p.add_argument("--layout", default="fill", choices=["fill", "fit"]); p.add_argument("--title")
     p.add_argument("--look", default="punchy"); p.add_argument("--no-trim", action="store_true")
     p.add_argument("--level", type=int, default=5, choices=range(1, 11), help="edit level: 1 barely edited, 5 clean, 10 hyper")
+    p.add_argument("--cuts", default="zoom", choices=["zoom", "focus", "hard"], help="how jump cuts flow")
+    p.add_argument("--no-captions", action="store_true"); p.add_argument("--whisper", **whisper)
     p.add_argument("--lang"); p.add_argument("--out")
     p = sp.add_parser("edit"); p.add_argument("videos", nargs="+"); p.add_argument("--music", required=True)
     p.add_argument("--length", type=float, default=15); p.add_argument("--music-start", type=float)
@@ -444,7 +448,7 @@ def main():
     p.add_argument("--level", type=int, default=6, choices=range(1, 11), help="edit level: 1 barely edited, 5 clean, 10 hyper")
     p.add_argument("--music-fx", choices=["slowed", "sped"]); p.add_argument("--shots")
     p.add_argument("--flow", action="store_true", help="optical-flow slow-mo + vector motion blur")
-    p.add_argument("--lang"); p.add_argument("--out")
+    p.add_argument("--whisper", **whisper); p.add_argument("--lang"); p.add_argument("--out")
     p = sp.add_parser("story"); p.add_argument("spec"); p.add_argument("--out")
     p.add_argument("--relative", action="store_true", help="resolve paths relative to the spec file")
     p = sp.add_parser("plan-render"); p.add_argument("plan"); p.add_argument("out")

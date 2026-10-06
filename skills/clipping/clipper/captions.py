@@ -1,16 +1,21 @@
-"""Word-by-word clip-page captions rendered in-frame (no libass needed).
-Style: ALL CAPS, heavy font, white + thick black stroke, active/keyword word in yellow,
-1-3 words per card, pop-in scale 80->110->100% over ~5 frames, at ~65% screen height."""
+"""Word-by-word captions rendered in-frame (no libass needed). Two styles:
+  "clip"  clip-page captions: ALL CAPS, heavy font, white + thick black stroke, active/keyword word in yellow,
+          1-3 words per card, pop-in scale 80->110->100% over ~5 frames, at ~65% screen height.
+  "edit"  subtitles for edits: one small line (up to ~6 words), each word fading up as it is spoken,
+          key words in red, a soft shadow, fading out at the end of the line."""
 import os
 import re
+import unicodedata
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from . import shaping
 from .moments import POLAR
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_FONT_DIRS = [os.path.join(_HERE, "..", "fonts"), os.path.expanduser("~/Library/Fonts"), "/Library/Fonts",
+_FONT_DIRS = [os.path.join(os.environ.get("CLIPIT_HOME", os.path.expanduser("~/.clipit")), "fonts"),
+              os.path.join(_HERE, "..", "fonts"), os.path.expanduser("~/Library/Fonts"), "/Library/Fonts",
               "/System/Library/Fonts/Supplemental", "/System/Library/Fonts", "/usr/share/fonts/truetype/dejavu",
               os.path.expanduser("~/.local/share/fonts"), "/usr/share/fonts/TTF", "C:/Windows/Fonts"]
 FONTS = {
@@ -28,6 +33,9 @@ FONTS = {
     "mono": ["SpaceMono-Bold.ttf", "Courier New Bold.ttf", "courbd.ttf", "DejaVuSansMono-Bold.ttf"],
     # thin handwritten caption face for quiet "pov:" style intros
     "hand": ["AmaticSC-Bold.ttf", "Chalkboard.ttc", "Bradley Hand Bold.ttf", "DejaVuSans.ttf"],
+    # non-Latin scripts (Hindi, Arabic, ...): fonts that actually contain them, instead of empty boxes
+    "unicode": ["NotoSansDevanagari-Bold.ttf", "Kohinoor.ttc", "Arial Unicode.ttf", "NotoSans-Bold.ttf",
+                "DejaVuSans-Bold.ttf"],
 }
 
 
@@ -50,7 +58,8 @@ WHITE = (255, 255, 255)
 
 
 def _clean(w):
-    return re.sub(r"[^\w'%$!?&\-]", "", w).upper()
+    """Upper-case word without stray punctuation; vowel signs and other combining marks (Hindi matras) stay."""
+    return "".join(ch for ch in w if ch.isalnum() or ch in "'%$!?&-" or unicodedata.category(ch)[0] == "M").upper()
 
 
 def group_words(words, max_words=3, max_chars=16, max_gap=0.35):
@@ -74,10 +83,19 @@ def group_words(words, max_words=3, max_chars=16, max_gap=0.35):
 
 
 class CaptionRenderer:
-    def __init__(self, words, width=1080, height=1920, size=86, y_frac=0.66, stroke=9):
-        self.groups = group_words(words)
+    def __init__(self, words, width=1080, height=1920, size=86, y_frac=0.66, stroke=9, style="clip"):
+        self.style = style
+        self.face = "unicode" if any(ord(ch) > 0x24F for w in words for ch in w["w"]) else None
+        if style == "edit":
+            self.groups = group_words(words, max_words=6, max_chars=32, max_gap=0.6)
+            size = min(size, 46)
+        else:
+            self.groups = group_words(words)
         self.W, self.H = width, height
-        self.font = ImageFont.truetype(font_path(), size)
+        self.face = self.face or ("bold" if style == "edit" else "heavy")
+        # joined scripts (Hindi...) are shaped with HarfBuzz when installed (install.sh --with-hindi)
+        self.shape = shaping.available() and any(shaping.needs(w["w"]) for w in words)
+        self.font = ImageFont.truetype(font_path(self.face), size)
         self.size = size
         self.y = int(height * y_frac)
         self.stroke = stroke
@@ -89,17 +107,35 @@ class CaptionRenderer:
             nxt = self.groups[i + 1][0]["s"] if i + 1 < len(self.groups) else e + 0.5
             self.cards.append((s, min(nxt, e + 0.5), g))
 
+    def _width(self, text, font):
+        return shaping.text_rgba(text, font.path, font.size, (255, 255, 255))[1] if self.shape else font.getlength(text)
+
+    def _text(self, img, d, xy, text, font, fill, stroke=0, stroke_fill=(0, 0, 0)):
+        """Draw a word: Pillow's own layout, or shaped glyphs for joined scripts."""
+        if not self.shape:
+            d.text(xy, text, font=font, fill=fill, stroke_width=stroke, stroke_fill=stroke_fill)
+            return
+        arr, _ = shaping.text_rgba(text, font.path, font.size, fill[:3], stroke, stroke_fill[:3])
+        if len(fill) > 3:
+            arr[..., 3] = (arr[..., 3].astype(np.float32) * fill[3] / 255).astype(np.uint8)
+        pad = stroke + 4
+        x, y = int(xy[0]) - pad, int(xy[1] + font.getmetrics()[0] - int(font.size * 1.15) - pad)
+        x0, y0 = max(0, x), max(0, y)
+        crop = arr[y0 - y:y0 - y + img.height - y0, x0 - x:x0 - x + img.width - x0]
+        if crop.size:
+            img.alpha_composite(Image.fromarray(crop), (x0, y0))
+
     def _render(self, gi, active):
         key = (gi, active)
         if key in self.cache:
             return self.cache[key]
         g = self.cards[gi][2]
         space = self.size * 0.28
-        widths = [self.font.getlength(x["t"]) for x in g]
+        widths = [self._width(x["t"], self.font) for x in g]
         total = sum(widths) + space * (len(g) - 1)
         scale = min(1.0, (self.W - 120) / total)
-        font = self.font if scale >= 1 else ImageFont.truetype(font_path(), int(self.size * scale))
-        widths = [font.getlength(x["t"]) for x in g]
+        font = self.font if scale >= 1 else ImageFont.truetype(font_path(self.face), int(self.size * scale))
+        widths = [self._width(x["t"], font) for x in g]
         total = sum(widths) + space * scale * (len(g) - 1)
         pad = self.stroke * 2 + 10
         h = int(font.size * 1.35) + pad * 2
@@ -109,10 +145,39 @@ class CaptionRenderer:
         for i, it in enumerate(g):
             col = YELLOW if i == active else GREEN if it["key"] else WHITE
             # drop shadow then stroked text
-            d.text((x + 5, pad + 7), it["t"], font=font, fill=(0, 0, 0, 150), stroke_width=self.stroke,
-                   stroke_fill=(0, 0, 0, 150))
-            d.text((x, pad), it["t"], font=font, fill=col, stroke_width=self.stroke, stroke_fill=(0, 0, 0))
+            self._text(img, d, (x + 5, pad + 7), it["t"], font, (0, 0, 0, 150), self.stroke, (0, 0, 0, 150))
+            self._text(img, d, (x, pad), it["t"], font, col, self.stroke, (0, 0, 0))
             x += widths[i] + space * scale
+        arr = np.array(img)
+        self.cache[key] = arr
+        return arr
+
+    def _render_edit(self, gi, t):
+        """The line with each word faded up as it is spoken (alphas rounded so frames can be cached)."""
+        s, e, g = self.cards[gi]
+        out_a = min(1.0, (e - t) / 0.15)
+        alphas = tuple(round(min(1.0, max(0.0, (t - it["s"]) / 0.15)) * out_a, 1) for it in g)
+        key = (gi, alphas)
+        if key in self.cache:
+            return self.cache[key]
+        f, space = self.font, self.size * 0.3
+        words = [it["w"].strip() for it in g]
+        widths = [self._width(w, f) for w in words]
+        total = sum(widths) + space * (len(g) - 1)
+        if total > self.W - 120:
+            f = ImageFont.truetype(font_path(self.face), int(self.size * (self.W - 120) / total))
+            widths = [self._width(w, f) for w in words]
+            total = sum(widths) + space * (len(g) - 1)
+        pad = 24
+        img = Image.new("RGBA", (int(total) + 2 * pad, int(f.size * 1.4) + 2 * pad), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        x = pad
+        for w, wd, it, a in zip(words, widths, g, alphas):
+            if a > 0:
+                col = (235, 40, 40) if it["key"] else (245, 245, 245)
+                self._text(img, d, (x + 2, pad + 3), w, f, (0, 0, 0, int(150 * a)))
+                self._text(img, d, (x, pad), w, f, col + (int(255 * a),))
+            x += wd + space
         arr = np.array(img)
         self.cache[key] = arr
         return arr
@@ -120,6 +185,8 @@ class CaptionRenderer:
     def overlay(self, frame, t):
         """t = time on the words' clock (source speech time, or output time; see plan "source_time")."""
         for gi, (s, e, g) in enumerate(self.cards):
+            if s <= t < e and self.style == "edit":
+                return _paste(frame, self._render_edit(gi, t), self.W // 2, self.y)
             if s <= t < e:
                 active = 0
                 for k, it in enumerate(g):

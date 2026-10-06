@@ -231,8 +231,9 @@ def fade(x, fin=0.0, fout=0.0):
     return x
 
 
-def duck_envelope(voice, depth_db=-18, attack=0.015, release=0.3, thresh=0.02):
-    """Gain envelope for the music that dips whenever `voice` is active (sidechain)."""
+def duck_envelope(voice, depth_db=-18, attack=0.06, release=0.45, thresh=0.02):
+    """Gain envelope for the music that dips whenever `voice` is active (sidechain). The slow-ish attack and
+    release make the bed sink and come back smoothly instead of pumping or cutting out between words."""
     v = np.abs(voice).max(axis=0)
     win = int(0.03 * SR)
     lvl = np.sqrt(np.convolve(v ** 2, np.ones(win) / win, mode="same"))

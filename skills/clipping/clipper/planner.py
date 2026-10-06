@@ -14,14 +14,26 @@ from .beats import analyze, choose_window
 from .media import load_audio, probe, save_audio
 from .moments import POLAR, shots as detect_shots
 from .render import remap_table
-from .transcribe import words_in
+from .transcribe import captions_ok, words_in
 
 SR = A.SR
 
 
 def _track(src, s0, s1):
-    ts, xs, ys = reframe.track(src, max(0, s0 - 0.3), s1 + 0.3)
-    return {"t": ts.tolist(), "x": xs.tolist(), "y": ys.tolist()}
+    return reframe.track(src, max(0, s0 - 0.3), s1 + 0.3)
+
+
+def fit(track, zoom):
+    """(fit_z, zoom): keep the framed head whole through the shot's own zoom move. A head that only just fits
+    loses the zoom-in. One that doesn't fit at all is shown smaller, with fill around it: the renderer scales the
+    shot by min(1, scene limit / fit_z) at every moment, so each scene in the window is framed on its own terms."""
+    zm = (track or {}).get("zmax")
+    z0, z1 = zoom
+    if not zm or zm >= max(z0, z1):
+        return None, [z0, z1]
+    if zm >= 0.92:   # nearly fits: flatten the zoom instead of showing thin fill strips
+        z0, z1 = min(z0, max(1.0, zm)), min(z1, max(1.0, zm))
+    return max(z0, z1), [z0, z1]
 
 
 def lv(level, on):
@@ -32,7 +44,7 @@ def lv(level, on):
 
 # =================================================================== TALK CLIP
 def talk_plan(src, start, end, transcript, workdir, music=None, music_start=None, layout="fill",
-              title=None, look="punchy", trim_silence=True, music_db=-20, level=5):
+              title=None, look="punchy", trim_silence=True, music_db=-20, level=5, cuts="zoom", captions=True):
     words = words_in(transcript["words"], start, end)
     # --- keep-ranges: cut pauses > 0.45 s down to ~0.12 s (jump cuts keep pace)
     ranges = []
@@ -49,16 +61,18 @@ def talk_plan(src, start, end, transcript, workdir, music=None, music_start=None
         ranges = [[start, end]]
 
     track = _track(src, start, end) if layout == "fill" else None
+    tight = 1.15 if len(ranges) > 1 and lv(level, 4) else 1.0
+    fz, _ = fit(track, [1.0, tight + 0.03])   # one limit for the clip, so wide/tight stay distinct
     shots, t = [], 0.0
     zoom_state = 1.0
     hits = []
     for i, (a, b) in enumerate(ranges):
         d = b - a
-        # alternate framing on each jump cut (wide 1.0 / tight 1.15) like a 2-camera podcast edit
+        # alternate framing on each jump cut (wide / tight) like a 2-camera podcast edit
         if i > 0:
-            zoom_state = 1.18 if zoom_state == 1.0 else 1.0
+            zoom_state = tight if zoom_state == 1.0 else 1.0
         shots.append({"src": src, "out": [t, t + d], "src_in": a, "src_span": d, "profile": {"type": "const"},
-                      "zoom": [zoom_state, zoom_state + 0.03], "layout": layout, "track": track})
+                      "zoom": [zoom_state, zoom_state + 0.03], "fit_z": fz, "layout": layout, "track": track})
         t += d
     total = t
 
@@ -81,6 +95,12 @@ def talk_plan(src, start, end, transcript, workdir, music=None, music_start=None
             hits.append({"t": src_to_out(w["s"]), "type": "shake", "amt": 0.35 * lv(level, 8), "dur": 0.25, "freq": 14})
     if lv(level, 3):
         hits.append({"t": 0.0, "type": "punch", "amt": 0.12 * lv(level, 3), "dur": 0.5})  # opening punch
+    for sh in shots[1:]:   # every jump cut flows: a zoom cut (push in, land close, ease back) or a focus hunt
+        c = sh["out"][0]
+        if cuts == "zoom":
+            hits.append({"t": c, "type": "zoomcut", "amt": 1.0, "att": 0.1, "dur": 0.28, "scale": 0.1})
+        elif cuts == "focus":
+            hits.append({"t": c, "type": "focus", "amt": 1.0, "att": 0.1, "dur": 0.32, "px": 10})
 
     # ---- audio
     full = load_audio(src, SR)
@@ -93,7 +113,7 @@ def talk_plan(src, start, end, transcript, workdir, music=None, music_start=None
         m = m[:, ms:ms + voice.shape[1]]
         if m.shape[1] < voice.shape[1]:
             m = np.pad(m, ((0, 0), (0, voice.shape[1] - m.shape[1])))
-        m = A.fade(m, 0.3, 1.0) * 10 ** (music_db / 20) * 3.0
+        m = A.fade(m, 0.5, 1.5) * 10 ** (music_db / 20) * 3.0   # the bed runs continuously under every jump cut
         g = A.duck_envelope(voice, depth_db=-10)
         mix += m * g[None, : m.shape[1]]
     if lv(level, 4):
@@ -104,8 +124,8 @@ def talk_plan(src, start, end, transcript, workdir, music=None, music_start=None
     save_audio(apath, mix, SR)
 
     plan = {"fps": 30, "width": 1080, "height": 1920, "look": look, "duration": total, "shots": shots,
-            "hits": hits, "audio": apath, "motion_blur": False,
-            "captions": {"words": words, "source_time": True}}
+            "hits": hits, "audio": apath, "motion_blur": False, "edge": "blur",
+            "captions": {"words": words, "source_time": True} if captions and captions_ok(transcript) else None}
     if title:
         plan["title"] = {"text": title, "t0": 0, "t1": min(total, 4.0), "y": 330}
     return plan
@@ -124,10 +144,11 @@ def edit_plan(sources, music, workdir, length=15.0, music_start=None, hook=None,
         m0, _ = choose_window(ma, length, pre_drop=pre)
     else:
         m0 = music_start
+    bar = 4 * beat   # end on a bar line, so the music finishes a phrase instead of stopping mid-bar
+    length = max(bar, round(length / bar) * bar)
     m1 = m0 + length
     beats = [b - m0 for b in ma["beats"] if m0 - 1e-3 <= b < m1]
     downs = set(round(b - m0, 3) for b in ma["downbeats"] if m0 - 1e-3 <= b < m1)
-    strength = {round(b - m0, 3): s for b, s in zip(ma["beats"], ma["beat_strength"]) if m0 <= b < m1}
     drop = ma["drop"] - m0
     if not (0 < drop < length):
         drop = beats[len(beats) // 4] if beats else length * 0.3
@@ -177,9 +198,11 @@ def edit_plan(sources, music, workdir, length=15.0, music_start=None, hook=None,
         d = o1 - o0
         is_hook = hook and si == 0
         if is_hook:
+            tr = _track(hook["src"], hook["start"], hook["start"] + d)
+            fz, zoom = fit(tr, [1.0, 1.08])
             shots_out.append({"src": hook["src"], "out": [o0, o1], "src_in": hook["start"], "src_span": d,
-                              "profile": {"type": "const"}, "zoom": [1.0, 1.12], "layout": "fill",
-                              "track": _track(hook["src"], hook["start"], hook["start"] + d)})
+                              "profile": {"type": "const"}, "zoom": zoom, "fit_z": fz, "layout": "fill",
+                              "track": tr, "voice": True})
             continue
         cand = pool[used % len(pool)]
         used += 1
@@ -204,54 +227,40 @@ def edit_plan(sources, music, workdir, length=15.0, music_start=None, hook=None,
         src_in = float(np.clip(src_in, sh_s, max(sh_s, sh_e - span)))
         info = probe(cand["src"])
         src_in = float(np.clip(src_in, 0, max(0, info["duration"] - span - 0.1)))
-        z0 = 1.0 + 0.03 * (si % 3)
+        tr = _track(cand["src"], src_in, src_in + span)
+        fz, zoom = fit(tr, [1.0, 1.1])   # the same gentle push on every shot, toward the face
         shot = {"src": cand["src"], "out": [o0, o1], "src_in": src_in, "src_span": span, "profile": prof,
-                "zoom": [z0, z0 + (0.12 if prof["type"] != "ramp" else 0.2)], "layout": "fill",
-                "track": _track(cand["src"], src_in, src_in + span), "captions": False}
+                "zoom": zoom, "fit_z": fz, "layout": "fill", "track": tr, "captions": False}
         if min(prof.get("lo", 1), prof.get("speed", 1)) < 0.5:
             shot["interp"] = "flow"  # optical-flow slow motion
         shots_out.append(shot)
 
-    # ---- hits (effects choreography)
-    # (each effect switches on at its own level and grows stronger up to 10; see lv())
+    # ---- hits (effects choreography): every cut flows, extras switch on with the level (see lv())
     for c in bounds[1:-1]:
-        st = strength.get(round(c, 3), 1.0)
         on_down = round(c, 3) in downs
-        if lv(level, 4):   # zoom settles over the new shot
-            hits.append({"t": c, "type": "punch", "amt": 0.10 * lv(level, 4), "dur": 0.5})
-        if lv(level, 5):   # the new shot pulls into focus
-            hits.append({"t": c, "type": "defocus", "amt": lv(level, 5), "dur": 0.3, "px": 12})
-        if lv(level, 6):   # the old shot sinks toward black just before the cut (a blink)
-            hits.append({"t": c, "type": "black", "amt": 0.6 * lv(level, 6), "dur": 0.0001, "att": 0.15, "shape": "hold"})
-        if lv(level, 6) and (on_down or level >= 8):   # jolt peaking on the cut
-            hits.append({"t": c, "type": "jolt", "amt": 0.7 * lv(level, 6), "att": 0.07, "dur": 0.35, "speed": 0.6})
-        if on_down and lv(level, 6):
-            hits.append({"t": c, "type": "flash", "amt": 0.85 * lv(level, 6), "dur": 0.1})
-            hits.append({"t": c, "type": "shake", "amt": 0.8 * lv(level, 6), "dur": 0.3, "freq": 16, "px": 50})
-        elif st > 1.2 and lv(level, 8):
-            hits.append({"t": c, "type": "rgb", "amt": lv(level, 8), "dur": 0.15, "px": 22})
-        elif lv(level, 5):
-            hits.append({"t": c, "type": "exposure", "amt": 0.5 * lv(level, 5), "dur": 0.12})
-    # transitions after the drop: every 2nd downbeat from level 7 (all four kinds from 8),
-    # every 4th at levels 4-6 (zoom and whip only), none below 4
-    trans = ["zoom_in", "whip", "spin", "glitch"] if level >= 8 else ["zoom_in", "whip"]
-    every = 2 if level >= 7 else 4 if level >= 4 else 0
-    for j, dbt in enumerate(sorted(d for d in downs if d > drop + 0.1)):
-        if every and j % every == every - 1:
-            typ = trans[(j // every) % len(trans)]
-            if typ == "glitch":
-                hits.append({"t": dbt, "type": "glitch", "amt": 0.9, "dur": 0.2, "att": 0.07})
-            else:
-                hits.append({"t": dbt, "type": typ, "amt": 1.0, "dur": 0.13, "att": 0.1, "dir": (-1) ** (j // every)})
-    # THE DROP: (level it switches on at, hit)
-    drop_hits = [(3, {"t": drop, "type": "flash", "amt": 1.0, "dur": 0.15}),
-                 (4, {"t": drop, "type": "zoom_in", "amt": 1.0, "dur": 0.18, "att": 0.12, "scale": 1.0}),
-                 (5, {"t": drop, "type": "shake", "amt": 1.3, "dur": 0.5, "freq": 18, "px": 60}),
-                 (7, {"t": drop, "type": "rgb", "amt": 1.0, "dur": 0.35, "px": 30}),
-                 (8, {"t": drop + beat, "type": "flicker", "amt": 0.7, "dur": beat * 0.9, "shape": "hold"})]
-    hits += [dict(h, amt=h["amt"] * lv(level, on)) for on, h in drop_hits if lv(level, on)]
-    # ending: fade to black on the last beat (clean loop point)
-    hits.append({"t": length - 0.25, "type": "black", "amt": 1.0, "dur": 0.3, "att": 0.25, "shape": "hold"})
+        if lv(level, 2):   # a quick focus-hunting cut, so the change of shot doesn't jar
+            hits.append({"t": c, "type": "focus", "amt": 1.0, "att": 0.1, "dur": 0.3, "px": 11})
+        if on_down and lv(level, 5):   # the old shot dips toward dark into a bar-line cut (a blink)
+            hits.append({"t": c, "type": "black", "amt": 0.45 * lv(level, 5), "dur": 0.0001, "att": 0.12, "shape": "hold"})
+        if on_down and c > drop + 0.1 and lv(level, 7):   # a short jolt on bar lines after the drop
+            hits.append({"t": c, "type": "jolt", "amt": 0.5 * lv(level, 7), "att": 0.06, "dur": 0.3, "speed": 0.5})
+        if on_down and c > drop + 0.1 and lv(level, 9):
+            hits += [{"t": c, "type": "flash", "amt": 0.5 * lv(level, 9), "dur": 0.08},
+                     {"t": c, "type": "shake", "amt": 0.6 * lv(level, 9), "dur": 0.25, "freq": 16, "px": 40}]
+    for j, dbt in enumerate(sorted(d for d in downs if d > drop + 0.1)):   # transitions: hyper edits only
+        if level >= 9 and j % 2 == 1:
+            typ = ["zoom_in", "whip"][(j // 2) % 2]
+            hits.append({"t": dbt, "type": typ, "amt": 1.0, "dur": 0.13, "att": 0.1, "dir": (-1) ** (j // 2)})
+    # THE DROP: (level it switches on at, hit). At 4-6 the cut itself is the hit.
+    drop_hits = [(4, {"t": drop, "type": "black", "amt": 1.0, "dur": 0.0001, "att": 0.12, "shape": "hold"}),
+                 (6, {"t": drop, "type": "bloom", "amt": 0.6, "dur": 0.5}),
+                 (7, {"t": drop, "type": "flash", "amt": 0.6, "dur": 0.15}),
+                 (7, {"t": drop, "type": "shake", "amt": 0.7, "dur": 0.35, "freq": 16, "px": 40}),
+                 (9, {"t": drop, "type": "rgb", "amt": 0.8, "dur": 0.3, "px": 26}),
+                 (9, {"t": drop + beat, "type": "flicker", "amt": 0.5, "dur": beat * 0.9, "shape": "hold"})]
+    hits += [dict(h, amt=h["amt"] * (1 if h["type"] == "black" else lv(level, on))) for on, h in drop_hits if lv(level, on)]
+    # a clean close: the last beat fades to black while the music fades out
+    hits.append({"t": length - 0.05, "type": "black", "amt": 1.0, "dur": 0.3, "att": min(0.8, beat), "shape": "hold"})
 
     # ---- audio
     m = load_audio(music, SR)
@@ -260,9 +269,7 @@ def edit_plan(sources, music, workdir, length=15.0, music_start=None, hook=None,
     elif music_fx == "sped":
         m = A.resample_speed(m, 1.25)
     seg = m[:, int(m0 * SR):int(m1 * SR)]
-    mix = A.fade(seg, 0.05, 0.4)
-    if level >= 5:   # a pocket of silence right before the drop
-        mix = A.dip(mix, drop - 0.12, drop - 0.01, -18)
+    mix = A.fade(seg, 0.05, 1.5)   # starts on a downbeat, ends on a bar line with a long fade: never abrupt
     if level >= 3:   # the low end falls away at the end
         mix = A.thin_out(mix, length - 0.8, 0.8)
     ref = A.ref_db(mix)

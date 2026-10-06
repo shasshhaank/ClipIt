@@ -1,14 +1,51 @@
 """Low-level media IO: probing, audio extraction, streaming frame reader, encoder pipe."""
+import functools
 import json
+import math
 import os
+import re
+import shutil
 import subprocess
 import numpy as np
 
-FFMPEG = "ffmpeg"
-FFPROBE = "ffprobe"
+HOME = os.environ.get("CLIPIT_HOME", os.path.expanduser("~/.clipit"))   # venv, fonts, ffmpeg link
 
 
+def _ffmpeg():
+    """ffmpeg from PATH, else the build that ships inside the imageio-ffmpeg package (no Homebrew needed).
+    That build is linked into ~/.clipit/bin and put on PATH, so Whisper and yt-dlp find it too."""
+    if shutil.which("ffmpeg"):
+        return "ffmpeg"
+    try:
+        import imageio_ffmpeg
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return "ffmpeg"   # not installed: the first call fails with a clear "No such file" error
+    link = os.path.join(HOME, "bin", "ffmpeg")
+    try:
+        os.makedirs(os.path.dirname(link), exist_ok=True)
+        if os.path.realpath(link) != os.path.realpath(exe):
+            if os.path.lexists(link):
+                os.remove(link)
+            os.symlink(exe, link)
+        os.environ["PATH"] = os.path.dirname(link) + os.pathsep + os.environ.get("PATH", "")
+        return "ffmpeg"
+    except OSError:
+        return exe
+
+
+FFMPEG = _ffmpeg()
+FFPROBE = shutil.which("ffprobe")
+# Audio that starts later (or earlier) than the picture, as phone recordings often do, is shifted onto the
+# video's clock; without it speech drifts off the lips by the stream offset.
+ALIGN = ["-af", "aresample=async=1:min_hard_comp=0.001:first_pts=0"]
+
+
+@functools.lru_cache(maxsize=None)
 def probe(path):
+    """duration, has_audio, width, height, fps and a_offset (audio start minus video start, s)."""
+    if not FFPROBE:
+        return _probe_ffmpeg(path)
     out = subprocess.run(
         [FFPROBE, "-v", "error", "-print_format", "json", "-show_streams", "-show_format", path],
         capture_output=True, text=True, check=True).stdout
@@ -27,20 +64,47 @@ def probe(path):
         if abs(rot) in (90, 270):
             w, h = h, w
         res.update(width=w, height=h, fps=fps if 1 < fps < 241 else 30.0)
+        if a:
+            res["a_offset"] = float(a.get("start_time", 0) or 0) - float(v.get("start_time", 0) or 0)
     return res
 
 
+def _probe_ffmpeg(path):
+    """probe() from `ffmpeg -i` when ffprobe isn't installed. Stream offsets aren't printed there, so a_offset is
+    unknown (None) and video audio is always aligned to the picture."""
+    err = subprocess.run([FFMPEG, "-hide_banner", "-i", path], capture_output=True, text=True).stderr
+    d = re.search(r"Duration: (\d+):(\d+):([\d.]+)", err)
+    if not d:
+        raise RuntimeError(f"can't read {path}: {err.strip().splitlines()[-1] if err.strip() else 'unknown format'}")
+    res = {"duration": int(d[1]) * 3600 + int(d[2]) * 60 + float(d[3]), "has_audio": "Audio:" in err}
+    v = re.search(r"Stream #[^\n]*Video:[^\n]*?(\d{2,5})x(\d{2,5})[^\n]*", err)
+    if v:
+        w, h = int(v[1]), int(v[2])
+        f = re.search(r"([\d.]+) fps", v[0]) or re.search(r"([\d.]+) tbr", v[0])
+        fps = float(f[1]) if f else 30.0
+        rot = re.search(r"rotation of (-?[\d.]+) degrees", err)
+        if rot and abs(round(float(rot[1]))) in (90, 270):
+            w, h = h, w
+        res.update(width=w, height=h, fps=fps if 1 < fps < 241 else 30.0, a_offset=None)
+    return res
+
+
+def _align(path):
+    off = probe(path).get("a_offset", 0.0) if os.path.splitext(path)[1].lower() not in (".wav", ".mp3", ".flac") else 0.0
+    return ALIGN if off is None or abs(off) > 0.0005 else []
+
+
 def extract_audio(src, dst, sr=44100, mono=False):
-    subprocess.run([FFMPEG, "-y", "-v", "error", "-i", src, "-vn", "-ac", "1" if mono else "2", "-ar", str(sr),
-                    "-c:a", "pcm_s16le", dst], check=True)
+    subprocess.run([FFMPEG, "-y", "-v", "error", "-i", src, "-vn", *_align(src), "-ac", "1" if mono else "2",
+                    "-ar", str(sr), "-c:a", "pcm_s16le", dst], check=True)
     return dst
 
 
 def load_audio(path, sr=44100, mono=False):
-    """Decode any audio/video file to float32 numpy (channels, samples)."""
+    """Decode any audio/video file to float32 numpy (channels, samples), on the video's clock."""
     ch = 1 if mono else 2
     raw = subprocess.run(
-        [FFMPEG, "-v", "error", "-i", path, "-vn", "-ac", str(ch), "-ar", str(sr), "-f", "f32le", "-"],
+        [FFMPEG, "-v", "error", "-i", path, "-vn", *_align(path), "-ac", str(ch), "-ar", str(sr), "-f", "f32le", "-"],
         capture_output=True, check=True).stdout
     return np.frombuffer(raw, dtype=np.float32).reshape(-1, ch).T.copy()
 
@@ -63,6 +127,9 @@ class SegmentReader:
       interp_fps=N    pre-interpolate with ffmpeg minterpolate (MCI) to N fps"""
 
     def __init__(self, src, start, dur, width, height, fps, interp_fps=None, interp="blend"):
+        # start on a real source frame: frame i is then exactly start + i / fps, so picture and sound line up
+        # and normal-speed playback shows whole frames instead of blends of two
+        start = math.floor(max(0.0, start) * fps + 1e-3) / fps
         self.start = start
         self.interp = interp
         self.flow = None
@@ -77,7 +144,7 @@ class SegmentReader:
         else:
             vf.append(f"fps={fps}")
         vf.append(f"scale={width}:{height}")
-        cmd = [FFMPEG, "-v", "error", "-ss", f"{max(0, start):.3f}", "-i", src, "-t", f"{dur + 0.5:.3f}",
+        cmd = [FFMPEG, "-v", "error", "-ss", f"{max(0.0, start - 0.25 / fps):.4f}", "-i", src, "-t", f"{dur + 0.5:.3f}",
                "-an", "-vf", ",".join(vf), "-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
         self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10 ** 8)
         self.frames = {}
@@ -108,11 +175,12 @@ class SegmentReader:
         return max(0.0, (t - self.start) * self.fps)
 
     def get(self, t, blend=True):
+        """Frame at source time t; blend=False returns the nearest whole frame (normal and fast speeds)."""
         x = self._pos(t)
         i = int(x)
+        frac = x - i if blend else round(x - i)
         a = self._frame(i)
-        frac = x - i
-        if not blend or frac < 0.08:
+        if frac < 0.08:
             return a
         b = self._frame(i + 1)
         if b is None or a is None or b is a:

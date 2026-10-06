@@ -20,6 +20,8 @@ Common hit fields:
 ## Camera and transitions
 | type | what it does | key params |
 |---|---|---|
+| `focus` | focus-hunting cut: racks soft over `att` before the cut, then the next shot hunts (nearly sharp, soft again, sharp) over `dur`, the frame breathing slightly; added on every cut automatically | `px` 10–16, `att` 0.1–0.2, `dur` 0.3–0.45 |
+| `zoomcut` | zoom cut: pushes in over `att` before the cut, the next shot lands pushed in and eases back over `dur` (radial blur); the default on talking-clip jump cuts | `scale` 0.1–0.12, `att` 0.1, `dur` 0.28 |
 | `punch` | zoom punch-in | `amt` 0.06–0.2 |
 | `shake` | decaying sine shake with rotation and motion blur | `px` 20–60, `freq` 12–22, `rot` |
 | `handheld` | smooth, Perlin-like drift | `px` 8–20, `speed` |
@@ -31,7 +33,9 @@ Common hit fields:
 | `spin` | rotation transition with zoom and blur | `deg` 15–40 |
 | `bulge` | lens distortion: fisheye bulge (`k>0`) or pinch (`k<0`), the zoom-transition "suck" | `k` −0.6…1.0 |
 
-Edges are mirrored by default (plan `"edge": "mirror"`), so shakes, spins and zoom-outs never show black borders.
+Edges are mirrored by default (plan or shot `"edge": "mirror"`, the motion-tile look), so shakes, spins and zoom-outs never show black borders. `"edge": "blur"` fills with a blurred, darkened copy instead (the clip-page default), and `"stretch"` repeats the edge pixels.
+
+**Face-safe framing.** Shots with `"layout": "fill"` are framed on the faces found in them (YuNet, `clipper/reframe.py`): the speaker in a two-shot, eyes on the upper third, and a zoom limit per scene that keeps the whole head in frame. When a head doesn't fit even the plain 9:16 crop, the picture is shown smaller and the `edge` fill shows above and below. A shot's `"fit": false` turns the limit off; `cx`/`cy` set the centre by hand.
 
 ## Light and colour
 | type | what it does |
@@ -45,7 +49,7 @@ Edges are mirrored by default (plan `"edge": "mirror"`), so shakes, spins and zo
 | `leak` | procedural light leak drifting across the frame |
 | `rgb` | RGB split, horizontal channel offset (`px` 10–35) |
 | `rgb_radial` | radial chromatic aberration, like lens fringing (`px` 0.01–0.04) |
-| `defocus` | lens defocus; a focus pull into a shot when it decays (`px` 12) |
+| `defocus` | lens defocus (a round, disc-shaped blur like a real lens); a focus pull into a shot when it decays (`px` 12) |
 | `desat` | colour drains out (`amt` 1 = black and white) |
 | `halftone` | print-dot screen flash (also continuous `fx` key `halftone`) |
 | `rays` | light rays streaking out of the bright edges (`color`, `length` 0.35) |
@@ -63,7 +67,7 @@ Edges are mirrored by default (plan `"edge": "mirror"`), so shakes, spins and zo
 | `jolt` | jolts across blur, colour, light, scale, slide and time stutter, re-rolled every 2 frames. `speed` 0–1 sets the density and `seed` the variation |
 | `jaws` | jagged black bars biting in from top and bottom (`depth` 0.2, `teeth` 9, `tilt` ±6, `opacity` 0.8); about half a beat, on the beat |
 | `ripple` | water ripple spreading from `x`, `y` (0–1) with a shine on the crests (`px` 22, `wavelength` 90) |
-| `gap` | audio only: dips the music by `db` (−18) for `dur` (0.12 s) right before its moment |
+| `gap` | audio only: dips the music by `db` (−18) for `dur` (0.12 s) right before its moment. Never automatic; viewers hear it as the music cutting, so use it only when asked |
 
 Continuous `fx` keys (plan-wide or per shot) also include `film_flicker` (0.12–0.2, an irregular exposure flicker), `dust` (old-film specks and scratches) and `halftone`.
 
@@ -83,7 +87,7 @@ Shot options:
   - `false` turns it off.
 
 ## Looks (grades)
-`clean`, `punchy`, `teal_orange`, `dark`, `mono`, `warm_film`. Each is a contrast S-curve with shadow and highlight tint, saturation, sharpening, grain and vignette. A shot's `look` overrides the plan default, so a story can go from mono in the setup to colour on the drop.
+`clean`, `punchy`, `teal_orange`, `dark`, `mono`, `warm_film`, `bright` (wholesome: airy, colourful, glowing highlights), plus `crisp4k`, `hdr` and `poster` below. Each is a contrast S-curve with shadow and highlight tint, saturation, sharpening, grain and vignette. A shot's `look` overrides the plan default, so a story can go from mono in the setup to colour on the drop.
 
 ## Text layers
 Fields:
@@ -95,6 +99,9 @@ Fields:
 - `glow`: 0–1.2, with `glow_radius` and `glow_color`.
 - `hum`: 0–0.6 sets the depth of the audio-reactive 50 Hz flicker. A 50 Hz sine sampled at 30 fps aliases to a slow three-frame shimmer. Its depth follows the music's onset envelope, and the hardest onsets drop the layer for one frame. Set `hum_drop: false` to keep logos solid.
 - `[brackets]`: words inside brackets use the `accent` colour.
+- `bar`: `[r,g,b]`, a solid bar behind each line (`bar_pad` 0.35 of the size), for meme labels such as a red bar reading MOGGED across the eyes (the `label` style; put it on a freeze frame with `follow: {"dy": 0}` to sit on the eyes).
+- Story text styles: `title`, `slam`, `type`, `subtitle` (small, white, word by word, fading out), `label` and `poster`.
+- Captions (`plan.captions.style`): `clip` (big, bold, 1–3 words, the clip-page style) or `edit` (one small line that fades up word by word as it is spoken, key words in red; the default for story dialogue). Hindi and other non-Latin scripts switch to a font that contains them. Joined scripts render best where Pillow has complex-text layout (libraqm); without it a few joined letters may not form.
 - `font`: `heavy`, `condensed`, `bold`, `regular`, `poster`, `wide`, `mono`, `hand` (thin handwritten), or a path to a .ttf file.
 
 ## Poster frames (`"style": "poster"`)

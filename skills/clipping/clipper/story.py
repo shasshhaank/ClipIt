@@ -16,7 +16,7 @@ from . import audio as A
 from .beats import analyze
 from .media import load_audio, probe, save_audio
 from .moments import looks_like_slideshow
-from .planner import _track, lv
+from .planner import _track, fit, lv
 from .render import remap_table
 
 SPEEDS = {
@@ -28,6 +28,7 @@ SPEEDS = {
     "quick": {"type": "ease_in", "hi": 1.6, "lo": 0.35},            # a kick that slides into slow-mo
     "push": {"type": "ease_out", "lo": 0.5, "hi": 1.8},             # slow into fast (into a cut)
     "settle": {"type": "ease_in", "hi": 1.0, "lo": 0.3, "k": 2.0},  # real time decelerating to 30%: the workhorse
+    "velocity": {"type": "ramp", "hi": 2.0, "lo": 0.6, "k": 2.0},   # 200% -> 60% -> 200%, eased: the classic per-clip ramp
     "smooth": {"type": "ramp", "hi": 6.0, "lo": 0.15, "k": 1.6},    # V curve: 10x-0.1x-10x feel
     "decel": {"type": "decel", "hi": 8.0, "lo": 1.0, "k": 3.0},     # 10x -> 1x, cubic out
     "boomerang": {"type": "boomerang", "hi": 4.0, "lo": 0.4, "k": 3.0},  # forward (decelerating) then back
@@ -44,6 +45,12 @@ TEXT_STYLES = {
                  glow=0.7, glow_radius=18, hum=0.3, anim="type", type_dur=0.45, y=1420),
     # full-frame poster typography (render.PosterLayer); rare by design, see docs/PLAYBOOK.md
     "poster": dict(kind="poster", font="poster", color=(240, 236, 224), layout="stack", anim="cut", y=960),
+    # a meme label on a coloured bar, e.g. over the eyes on a freeze frame the beat before the drop
+    "label": dict(font="wide", size=58, stroke=0, color=(255, 255, 255), accent=(255, 255, 255), bar=(200, 18, 32),
+                  glow=0, shadow=False, anim="cut", y=760),
+    # small subtitle-style line that fades in word by word (intros, quotes)
+    "subtitle": dict(font="bold", size=44, stroke=0, color=(245, 245, 245), accent=(235, 40, 40), glow=0.4,
+                     glow_radius=10, anim="words", type_dur=0.6, fade_out=0.25, y=1240),
 }
 
 
@@ -71,6 +78,7 @@ class Beats:
         self.M0 = max(0.0, grid[self.start_idx])
         self.beats = [b - self.M0 for b in grid]
         self.end_beat = bars_after * 4
+        self.offset = 0.0   # output time where the beat grid starts (after a dialogue intro)
 
     def __call__(self, n):
         """Output time (s) of beat n relative to the drop; fractional beats interpolate."""
@@ -79,7 +87,7 @@ class Beats:
         i = self.di + lo
         a = self.beats[max(0, min(i, len(self.beats) - 1))]
         b = self.beats[max(0, min(i + 1, len(self.beats) - 1))]
-        return max(0.0, a + (b - a) * f)
+        return self.offset + max(0.0, a + (b - a) * f)
 
 
 _SCENES = {}
@@ -159,6 +167,58 @@ def readable(texts, end, opts=None):
               f"let the footage and the music carry the rest.")
 
 
+def snap_line(words, s0, s1):
+    """Widen a soundbite [s0, s1] to whole words: never start or stop inside a word, keep a breath of room on
+    each side without catching a piece of the neighbouring words. Returns (start, end, words, ends_sentence)."""
+    inside = [w for w in words if w["e"] > s0 + 0.03 and w["s"] < s1 - 0.03]
+    if not inside:
+        return s0, s1, [], True
+    i0, i1 = words.index(inside[0]), words.index(inside[-1])
+    before = words[i0 - 1]["e"] if i0 > 0 else 0.0
+    after = words[i1 + 1]["s"] if i1 + 1 < len(words) else inside[-1]["e"] + 1.0
+    start = max(inside[0]["s"] - 0.12, (before + inside[0]["s"]) / 2)
+    end = min(inside[-1]["e"] + 0.2, (inside[-1]["e"] + after) / 2)
+    done = inside[-1]["w"].rstrip().endswith((".", "?", "!")) or after - inside[-1]["e"] > 0.35
+    return start, end, inside, done
+
+
+def _dialogue(spec, P, workdir, edge):
+    """The dialogue intro: whole spoken lines played in order at normal speed, timed by the words, not the beat.
+    Returns (shots, voices, caption words, length)."""
+    shots, voices, cap, t = [], [], [], 0.0
+    for d in spec.get("dialogue", []):
+        src = P(d["src"])
+        s0, s1, words, done = d["start"], d["end"], [], True
+        try:
+            from .transcribe import captions_ok, transcribe
+            tr = transcribe(src, os.path.join(workdir, "tr_" + os.path.splitext(os.path.basename(src))[0]),
+                            model=spec.get("whisper"))
+            s0, s1, words, done = snap_line(tr["words"], s0, s1)
+            if not captions_ok(tr):
+                d = dict(d, captions=False)
+        except ImportError:
+            print("  ! no transcription available: dialogue keeps the given times and gets no captions")
+        span = s1 - s0
+        text = " ".join(w["w"] for w in words)
+        print(f'  dialogue {os.path.basename(src)} {s0:.2f}-{s1:.2f}s: "{text}"')
+        if not done:
+            print("  ! that line stops mid-sentence; widen `end` to the end of the sentence or pick another line")
+        tr = _track(src, s0, s1)
+        fz, zoom = fit(tr, d.get("zoom", [1.0, 1.04]))
+        shot = {"src": src, "out": [t, t + span], "src_in": s0, "src_span": span, "profile": {"type": "const", "speed": 1.0},
+                "zoom": zoom, "fit_z": fz, "track": tr, "layout": d.get("layout", "fill"), "voice": True,
+                "captions": bool(words) and d.get("captions", True), "edge": d.get("edge", edge)}
+        for key in ("look", "fx", "cx", "cy"):
+            if key in d:
+                shot[key] = d[key]
+        shots.append(shot)
+        voices.append((src, s0, span, t))
+        if shot["captions"]:
+            cap += [dict(w, s=w["s"] - s0 + t, e=w["e"] - s0 + t) for w in words]
+        t += span + d.get("gap", 0.0)
+    return shots, voices, cap, t
+
+
 def build(spec, workdir, base_dir="."):
     P = lambda p: p if os.path.isabs(p) else os.path.join(base_dir, p)
     os.makedirs(workdir, exist_ok=True)
@@ -167,17 +227,22 @@ def build(spec, workdir, base_dir="."):
     B = bt.B
     first = min(s["from"] for s in spec["shots"])
     last = spec.get("end", bt.end_beat)
-    END = bt(last)
-    DROP = bt(0)
+    edge = spec.get("edge", "mirror")
+    # dialogue first (timed by the words), then the beat-timed montage starts where it ends
+    shots, voices, cap_words, intro = _dialogue(spec, P, workdir, edge)
+    bt.offset = intro
+    END, DROP = bt(last), bt(0)
     until = lambda b: END if b >= last else bt(b)   # end time of anything that runs to `b` (or to the end)
-    shots, hits, texts, images = [], [], [], []
-    voices, cap_words = [], []   # soundbites that play their own speech, and their captions (output time)
+    hits, texts, images = [], [], []
 
     # ------------------------------------------------------------ shots
     for s in sorted(spec["shots"], key=lambda x: x["from"]):
-        o0 = 0.0 if s["from"] == first else bt(s["from"])
+        o0 = intro if s["from"] == first else bt(s["from"])
         o1 = until(s["to"])
         sp = s.get("speed", "normal")
+        if s.get("voice") and sp not in ("normal", 1, 1.0):
+            print(f"  ! shot {s['from']}..{s['to']} carries a voice, so it plays at normal speed (speed '{sp}' ignored)")
+            sp = "normal"
         prof = dict(SPEEDS[sp]) if isinstance(sp, str) else ({"type": "const", "speed": sp}
                                                              if isinstance(sp, (int, float)) else sp)
         _, _, mean, _ = remap_table(prof)
@@ -189,7 +254,8 @@ def build(spec, workdir, base_dir="."):
         if "start" in s:   # exact source second, e.g. where a soundbite begins
             src_in = float(np.clip(s["start"], 0, max(0, dur - span)))
         shot = {"src": src, "out": [o0, o1], "src_in": src_in, "src_span": span, "profile": prof,
-                "zoom": s.get("zoom", [1.0, 1.12]), "layout": s.get("layout", "fill"), "captions": False}
+                "zoom": s.get("zoom", [1.0, 1.1]), "layout": s.get("layout", "fill"), "captions": False,
+                "voice": bool(s.get("voice")), "edge": s.get("edge", edge)}
         for key in ("look", "blur", "dim", "fx", "stepped_fps", "posterize", "interp", "mix", "zoom_follow"):
             if key in s:
                 shot[key] = s[key]
@@ -222,7 +288,7 @@ def build(spec, workdir, base_dir="."):
                 d["dur"] = d.get("dur", 0.5) * B          # move length in beats
                 zs.append(d)
             shot["zooms"] = zs
-            if s.get("velocity", sp == "normal" and bool(s.get("zooms"))):
+            if s.get("velocity", sp == "normal" and bool(s.get("zooms"))) and not s.get("voice"):
                 # time-remap peaks synced to the zoom moves (the "graph peak on the marker" rule)
                 us = [(z["t"] - o0) / max(o1 - o0, 1e-6) for z in zs]
                 vel = s.get("velocity") if isinstance(s.get("velocity"), dict) else {}
@@ -232,19 +298,20 @@ def build(spec, workdir, base_dir="."):
                 span = (o1 - o0) * mean
                 src_in = _fit(src, peak, span, dur, workdir, spec.get("guard_cuts", True))
                 shot.update(profile=prof, src_in=src_in, src_span=span)
+        shot["track"] = _track(src, src_in, src_in + span)   # faces: where to frame and how close is safe
         if "cx" in s:
             shot["cx"], shot["cy"] = s["cx"], s.get("cy", 0.45)
-        else:
-            shot["track"] = _track(src, src_in, src_in + span)
+        if s.get("fit", True) and shot["layout"] == "fill":
+            shot["fit_z"], shot["zoom"] = fit(shot["track"], shot["zoom"])
         if min(prof.get("speed", 1), prof.get("lo", 1)) < 0.6 and "interp" not in shot:
             shot["interp"] = spec.get("slowmo_interp", "flow")
         if s.get("voice"):   # a soundbite: the shot plays its own speech and the music ducks under it
-            if abs(mean - 1) > 1e-3:
-                print(f"  ! shot {s['from']}..{s['to']} carries a voice but isn't at normal speed; speech needs speed 1.0")
             voices.append((src, src_in, span, o0))
             if s.get("captions"):   # word-by-word captions of what is said (first run downloads Whisper)
-                from .transcribe import transcribe, words_in
-                tr = transcribe(src, os.path.join(workdir, "tr_" + os.path.splitext(os.path.basename(src))[0]))
+                from .transcribe import captions_ok, transcribe, words_in
+                tr = transcribe(src, os.path.join(workdir, "tr_" + os.path.splitext(os.path.basename(src))[0]),
+                                model=spec.get("whisper"))
+            if s.get("captions") and captions_ok(tr):
                 cap_words += [dict(w, s=w["s"] - src_in + o0, e=w["e"] - src_in + o0)
                               for w in words_in(tr["words"], src_in, src_in + span)]
                 shot["captions"] = True
@@ -263,7 +330,7 @@ def build(spec, workdir, base_dir="."):
         st["t1"] = until(tx["to"])
         if st.get("follow"):   # ride along with the subject of the shot it starts on
             sh = next((x for x in shots if x["out"][0] <= st["t0"] < x["out"][1]), shots[-1])
-            tr = sh.get("track") or _track(sh["src"], sh["src_in"], sh["src_in"] + sh["src_span"])
+            tr = sh["track"]
             fo = st["follow"] if isinstance(st["follow"], dict) else {}
             st["follow_track"] = dict(tr, src=sh["src"], dx=fo.get("dx", 0), dy=fo.get("dy", -260))
         texts.append(st)
@@ -359,56 +426,47 @@ def build(spec, workdir, base_dir="."):
             print(f"  ! '{o.get('text') or os.path.basename(o['path'])}' overlaps a poster frame; it's hidden while the poster is up.")
     if spec.get("auto_hits", True):
         n0 = len(hits)
-        trans = [x for x in spec.get("transitions", ["glitch", "whip", "zoom_in", "spin"]) if L >= 8 or x in ("whip", "zoom_in")]
-        every = 2 if L >= 7 else 4 if L >= 4 else 0   # a transition every 2 beats, every bar, or never
-        ti = 0
+        # every change of shot flows: a focus-hunting cut (soft into the cut, hunting sharp after it) or a zoom cut
+        # (push in, land close, ease back). Beat cuts get a quick one so the hit still lands on the beat.
+        style = spec.get("cuts", "focus")
+        cuts = [(sh["out"][0], sh) for sh in shots[1:] if not sh.get("mix")]
+        for i, (c, sh) in enumerate(cuts):
+            kind = sh.get("cut", style)
+            dialogue = sh.get("voice") or c <= intro + 1e-3   # cuts between spoken lines get the slow, full hunt
+            if kind == "focus":
+                hits.append({"t": c, "type": "focus", "amt": 1.0, "att": 0.2 if dialogue else 0.1,
+                             "dur": 0.45 if dialogue else 0.3, "px": 16 if dialogue else 11})
+            elif kind == "zoom":
+                hits.append({"t": c, "type": "zoomcut", "amt": 1.0, "att": 0.12, "dur": 0.3, "scale": 0.12})
         mixed = {s["from"] for s in spec["shots"] if s.get("mix")}
-        cut_beats = sorted({s["from"] for s in spec["shots"]} - {first} - mixed)
-        for cb in cut_beats:
+        voiced = {s["from"] for s in spec["shots"] if s.get("voice")}
+        for cb in sorted({s["from"] for s in spec["shots"]} - {first} - mixed):
             c = bt(cb)
-            if cb != 0 and not (ec and cb == ec["from"]):   # shot life, studied from pro project files:
-                if lv(L, 5):   # the new shot pulls into focus
-                    hits.append({"t": c, "type": "defocus", "amt": lv(L, 5), "dur": 0.3, "px": 12})
-                if lv(L, 6):   # the old shot sinks toward black just before the cut (a blink)
-                    hits.append({"t": c, "type": "black", "amt": 0.6 * lv(L, 6), "dur": 0.0001, "att": 0.15, "shape": "hold"})
-            if cb < 0:
-                if lv(L, 5):
-                    hits.append({"t": c, "type": "exposure", "amt": 0.6 * lv(L, 5), "dur": 0.15, "_sfx": "shutter"})
-                continue
             if cb == 0 or (ec and cb == ec["from"]):
                 continue
-            if lv(L, 4):
-                hits.append({"t": c, "type": "punch", "amt": 0.12 * lv(L, 4), "dur": 0.6})   # zoom settles over the shot
-            if lv(L, 6) and (cb % 4 == 0 or L >= 8):   # jolt peaking on the cut: bar lines from 6, every cut from 8
-                hits.append({"t": c, "type": "jolt", "amt": 0.7 * lv(L, 6), "att": 0.07, "dur": 0.35, "speed": 0.6})
-            if cb % 4 == 0 and lv(L, 6):
-                hits += [{"t": c, "type": "flash", "amt": 0.85 * lv(L, 6), "dur": 0.1},
-                         {"t": c, "type": "shake", "amt": 0.9 * lv(L, 6), "dur": 0.3, "freq": 16, "px": 50}]
-            elif cb % 4 and lv(L, 8):
-                hits.append({"t": c, "type": "rgb", "amt": lv(L, 8), "dur": 0.15, "px": 22})
-            if every and trans and cb % every == 0 and cb > 0:
-                typ = trans[ti % len(trans)]
-                ti += 1
-                if L >= 7:   # the music drops out for a few frames right before the transition
-                    hits.append({"t": c, "type": "gap", "dur": 0.1, "db": -12})
-                if typ == "glitch":
-                    hits.append({"t": c, "type": "glitch", "amt": 0.9, "dur": 0.15, "att": 0.06, "_sfx": "glitch"})
-                else:
-                    hits.append({"t": c, "type": typ, "amt": 1.0, "dur": 0.13, "att": 0.1,
-                                 "dir": (-1) ** ti, "scale": 0.8, "deg": 20, "_sfx": A.SFX_FOR.get(typ)})
-        # the drop: (level it switches on at, hit); strengths grow with the level
-        drop = [(3, {"t": DROP, "type": "black", "amt": 1.0, "dur": 0.0001, "att": 0.12, "shape": "hold"}),
-                (3, {"t": DROP, "type": "flash", "amt": 1.0, "dur": 0.2}),
-                (5, {"t": DROP, "type": "shake", "amt": 1.4, "dur": 0.55, "freq": 17, "px": 60}),
-                (6, {"t": DROP, "type": "bloom", "amt": 0.9, "dur": 0.5}),
-                (7, {"t": DROP, "type": "rgb", "amt": 1.0, "dur": 0.45, "px": 34}),
-                (8, {"t": bt(1), "type": "flash", "amt": 0.7, "dur": 0.1}),
-                (8, {"t": bt(1), "type": "shake", "amt": 0.9, "dur": 0.3, "freq": 18, "px": 45}),
-                (8, {"t": bt(-2), "type": "shake", "amt": 0.4, "dur": DROP - bt(-2), "freq": 22, "px": 20})]
+            bar = cb % 4 == 0
+            if bar and lv(L, 5):   # the old shot dips toward dark into a bar-line cut (a blink)
+                hits.append({"t": c, "type": "black", "amt": 0.45 * lv(L, 5), "dur": 0.0001, "att": 0.12, "shape": "hold"})
+            if cb > 0 and bar and lv(L, 7) and cb not in voiced:   # a short jolt on bar lines after the drop
+                hits.append({"t": c, "type": "jolt", "amt": 0.5 * lv(L, 7), "att": 0.06, "dur": 0.3, "speed": 0.5})
+            if cb > 0 and bar and lv(L, 9):
+                hits += [{"t": c, "type": "flash", "amt": 0.5 * lv(L, 9), "dur": 0.08},
+                         {"t": c, "type": "shake", "amt": 0.6 * lv(L, 9), "dur": 0.25, "freq": 16, "px": 40}]
+            if cb > 0 and cb % 8 == 0 and lv(L, 9):   # transitions only in hyper edits, and only every 2 bars
+                typ = spec.get("transitions", ["whip", "zoom_in"])[(cb // 8) % len(spec.get("transitions", ["whip", "zoom_in"]))]
+                hits.append({"t": c, "type": typ, "amt": 1.0, "dur": 0.13, "att": 0.1, "dir": (-1) ** (cb // 8),
+                             "scale": 0.8, "deg": 20, "_sfx": A.SFX_FOR.get(typ)})
+        # the drop: (level it switches on at, hit). At 4-6 the cut itself is the hit: dark beat, then clean footage.
+        drop = [(4, {"t": DROP, "type": "black", "amt": 1.0, "dur": 0.0001, "att": 0.12, "shape": "hold"}),
+                (6, {"t": DROP, "type": "bloom", "amt": 0.6, "dur": 0.5}),
+                (7, {"t": DROP, "type": "flash", "amt": 0.6, "dur": 0.15}),
+                (7, {"t": DROP, "type": "shake", "amt": 0.7, "dur": 0.35, "freq": 16, "px": 40}),
+                (9, {"t": DROP, "type": "rgb", "amt": 0.8, "dur": 0.3, "px": 26}),
+                (9, {"t": bt(1), "type": "flash", "amt": 0.5, "dur": 0.1}),
+                (9, {"t": bt(1), "type": "shake", "amt": 0.7, "dur": 0.3, "freq": 18, "px": 35})]
         hits += [dict(h, amt=h["amt"] * (1 if h["type"] == "black" else lv(L, on))) for on, h in drop if lv(L, on)]
-        if L >= 5:   # a pocket of silence right before the drop
-            hits.append({"t": DROP, "type": "gap", "dur": 0.12, "db": -18})
-        hits.append({"t": END - 0.15, "type": "black", "amt": 1.0, "dur": 0.4, "att": 0.25, "shape": "hold"})
+        # a clean close: the last beat fades to black while the music fades out
+        hits.append({"t": END - 0.05, "type": "black", "amt": 1.0, "dur": 0.4, "att": min(0.8, B), "shape": "hold"})
         # poster frames hold still: no automatic hits while one is up (a cut can still land on its first frame)
         hits[n0:] = [h for h in hits[n0:] if h["type"] == "black" or not any(a + 0.05 < h["t"] < b for a, b in posters)]
 
@@ -418,12 +476,15 @@ def build(spec, workdir, base_dir="."):
         mu = A.reverb(A.resample_speed(mu, 0.85), 3.0, 0.3)
     elif m.get("fx") == "sped":
         mu = A.resample_speed(mu, 1.25)
-    mix = mu[:, int(bt.M0 * A.SR):int((bt.M0 + END + 0.6) * A.SR)].copy()
+    m0 = int((bt.M0 - intro) * A.SR)   # with a dialogue intro the song starts earlier, under the speech
+    mix = mu[:, max(0, m0):int((bt.M0 - intro + END + 0.6) * A.SR)].copy()
+    if m0 < 0:
+        mix = np.pad(mix, ((0, 0), (-m0, 0)))
     if mix.shape[1] < int((END + 0.6) * A.SR):
         mix = np.pad(mix, ((0, 0), (0, int((END + 0.6) * A.SR) - mix.shape[1])))
-    mix = A.fade(mix, 0.02, 0.9)
+    mix = A.fade(mix, 0.3 if intro else 0.05, 1.5)   # the music never starts or stops abruptly
     for h in hits:
-        if h["type"] == "gap":   # audio-only hit: dip the music just before its moment
+        if h["type"] == "gap":   # audio-only hit, only when the spec asks: dip the music just before its moment
             mix = A.dip(mix, h["t"] - h.get("dur", 0.12), h["t"], h.get("db", -18))
     if L >= 3:   # the track loses its low end as the edit ends
         mix = A.thin_out(mix, END - 0.8, 0.8)
@@ -472,7 +533,8 @@ def build(spec, workdir, base_dir="."):
             "duration": END, "shots": shots, "hits": hits, "texts": texts, "images": images, "audio": apath,
             "motion_blur": spec.get("motion_blur", "flow"), "fx": spec.get("fx", {}),
             "letterbox": spec.get("letterbox", 0), "audio_env": on.tolist(), "overlays": overlays,
-            "captions": {"words": cap_words, "source_time": False, "y": spec.get("caption_y", 0.7)} if cap_words else None,
+            "captions": {"words": cap_words, "source_time": False, "y": spec.get("caption_y", 0.7),
+                         "style": spec.get("caption_style", "edit")} if cap_words else None,
             "music": {"path": P(m["path"]), "start": bt.M0, "tempo": bt.ma["tempo"], "drop_out": DROP}}
     return plan
 

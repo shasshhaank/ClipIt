@@ -54,6 +54,8 @@ this project isn't affiliated with any of them. Field details are in `EFFECTS.md
 | Saber (glowing outline) | text glow | `glow` + `glow_color` (a soft glow, not a traced outline) |
 | Cinematic bars | letterbox | `letterbox: 0.08–0.12` |
 | BCC Lens Blur, Camera Lens Blur (Iris Scale keys) | defocus | `defocus` hit (`px`) |
+| Focus hunting / rack focus (Camera Lens Blur keyed soft into a cut, then soft-sharp-soft-sharp) | focus-hunting cut | `focus` hit (automatic on every cut) |
+| Zoom cut (Transform Scale push across a cut) | zoom cut | `zoomcut` hit (automatic on talking-clip jump cuts) |
 | S_EdgeDetect / S_EdgeColorize + Deep Glow on a duplicate layer | neon edge ghost | `edges` hit (`color`, `grow`) |
 | S_EdgeRays | light rays | `rays` hit |
 | S_HalfTone, BCC Halftone | halftone | `halftone` hit or `fx` key |

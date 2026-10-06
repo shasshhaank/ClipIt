@@ -26,15 +26,26 @@ Relative paths resolve from the folder you run the command in. Pass `--relative`
   "fx": {"bloom": 0.15},      // continuous effects for the whole edit
   "motion_blur": "flow",      // "flow" (vector blur) | true | false
   "slowmo_interp": "flow",    // interpolation used automatically on shots slower than 0.6x
-  "auto_hits": true,          // auto flashes/shakes/RGB on cuts + full drop choreography + end fade
-  "transitions": ["glitch", "whip", "zoom_in", "spin"],   // rotated on every 2nd post-drop cut
+  "auto_hits": true,          // flowing cuts, blinks, the drop by level, and the end fade (docs/PLAYBOOK.md)
+  "cuts": "focus",            // how every cut flows: "focus" (focus-hunting cut) | "zoom" (zoom cut) | "hard"
+  "transitions": ["whip", "zoom_in"],   // only at levels 9-10, every two bars after the drop
+  "edge": "mirror",           // fill around a picture shown smaller than the frame: "mirror" (motion tile) | "blur"
+  "caption_style": "edit",    // dialogue captions: "edit" (small, word by word) | "clip" (big clip-page captions)
+  "whisper": "turbo",         // speech model: "turbo" (fast) | "large" (OpenAI Whisper large-v3; needed for Hindi subtitles)
   "sfx": true,                // generated sound kit, auto-placed and levelled (docs/EFFECTS.md, "Sound effects")
+
+  "dialogue": [               // optional: spoken lines that play FIRST, timed by the words, not the beat
+    {"src": "input/panel.mp4", "start": 132.4, "end": 136.1},   // snapped to whole words; printed back to check
+    {"src": "input/news.mp4", "start": 48.0, "end": 51.6, "look": "mono", "gap": 0.0}
+  ],                          // the beat-timed shots below start where the dialogue ends; the music runs under it
 
   "shots": [                  // contiguous, sorted by "from"
     {"src": "input/a.mp4", "from": -20, "to": -16, "peak": 48.6,   // peak = source second centred in the shot
      "speed": "slow",         // normal | settle | slow | slower | ramp | quick | push | hold | freeze | 0.7 | {profile}
      "look": "mono", "zoom": [1.05, 1.15],
-     "cx": 0.5, "cy": 0.45,   // fixed framing; omit for automatic face tracking
+     "cx": 0.5, "cy": 0.45,   // fixed framing; omit for automatic face framing (whole heads, eyes on the upper third)
+     "fit": true,             // keep heads whole: zoom limited per scene, picture shown smaller with fill if needed
+     "cut": "zoom",           // how the cut INTO this shot flows (overrides the top-level "cuts")
      "layout": "fill",        // or "fit" (whole frame over a blurred copy, good for screenshots)
      "blur": 9, "dim": 0.55,  // background plate for overlays
      "fx": {"vhs": 0.5}, "stepped_fps": 10}
@@ -89,9 +100,9 @@ Put it on a calm shot, such as `"speed": "hold"` with `"look": "poster"`.
  "follow": true, "rot": 90, "glow": 0.8, "glow_color": [0, 0, 0]},
 {"text": "LOOK AT ME", "from": 6, "to": 9, "style": "title", "anim": "assemble", "exit": "scatter", "behind": true}
 ```
-Voice shots must run at normal speed. Top-level `"voice_duck"` (−14 dB) sets how far the music dips under speech and `"caption_y"` (0.7) sets where captions sit. The first captioned run downloads the Whisper model once.
+Voice shots and `dialogue` lines always run at normal speed (a speed you set on a voice shot is ignored, with a note), and never get jolts. For several lines in a row, prefer the `dialogue` list: it isn't squeezed onto the beat grid, so lines are never cut mid-word. Top-level `"voice_duck"` (−14 dB) sets how far the music dips under speech and `"caption_y"` (0.7) sets where captions sit. The first captioned run downloads the Whisper model once.
 
-Hits can also carry `"sfx"` (a sound name or `null`), and a `{"type": "gap", "at": 8, "db": -15}` hit dips the music right before beat 8.
+Hits can also carry `"sfx"` (a sound name or `null`). A `{"type": "gap", "at": 8, "db": -15}` hit dips the music right before beat 8, but use it only when asked: viewers hear it as the music cutting.
 
 ## Speed profiles
 | name | curve | use |
@@ -99,6 +110,7 @@ Hits can also carry `"sfx"` (a sound name or `null`), and a `{"type": "gap", "at
 | `slow` | 0.5x constant (flow-interpolated) | setup, emotion |
 | `slower` | 0.3x | hero moments |
 | `settle` | 100% → 30%, decelerating | the workhorse: most shots in pro edits do this |
+| `velocity` | 200% → 60% → 200%, eased | the clean per-clip ramp; use the same one on every clip |
 | `ramp` | 180% → 22% → 180%, U-shaped | the classic velocity shot; the slow part lands on `peak` |
 | `quick` | 160% → 35% | a kick that slides into slow-mo; 1-beat punches |
 | `push` | 50% → 180% | accelerating into the drop |

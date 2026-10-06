@@ -2,9 +2,14 @@
 import numpy as np
 import librosa
 
+from .media import load_audio
+
 
 def analyze(path, sr=22050):
-    y, sr = librosa.load(path, sr=sr, mono=True)
+    try:
+        y, sr = librosa.load(path, sr=sr, mono=True)
+    except Exception:   # formats libsndfile can't read (m4a, mp4, webm): decode with ffmpeg instead
+        y = load_audio(path, sr, mono=True)[0]
     dur = len(y) / sr
     hop = 512
     onset = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop)

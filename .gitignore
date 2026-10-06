@@ -6,6 +6,7 @@ output/
 input/
 music/
 sfx/
-fonts/*.ttf
-fonts/*.otf
+*.ttf
+*.otf
 .DS_Store
+dist/

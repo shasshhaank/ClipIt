@@ -148,6 +148,11 @@ class TextLayer:
         for i, ln in enumerate(lines):
             clean = [w.strip("[]") for w in ln]
             x = (self.W - f.getlength(" ".join(clean))) / 2
+            if sp.get("bar"):   # a solid bar behind the line, e.g. a meme label across the eyes
+                b = f.getbbox(" ".join(clean))
+                p = sp.get("bar_pad", 0.35) * f.size
+                d.rectangle((x + b[0] - p, 30 + i * lh + b[1] - p / 2, x + b[2] + p, 30 + i * lh + b[3] + p / 2),
+                            fill=tuple(sp["bar"]))
             for w, c in zip(ln, clean):
                 if upto is None or n < upto:
                     fill = acc if w.startswith("[") else col
@@ -565,7 +570,8 @@ class Renderer:
         self.caps = None
         c = plan.get("captions")
         if c and c.get("words"):
-            self.caps = CaptionRenderer(c["words"], self.W, self.H, size=c.get("size", 86), y_frac=c.get("y", 0.66))
+            self.caps = CaptionRenderer(c["words"], self.W, self.H, size=c.get("size", 86), y_frac=c.get("y", 0.66),
+                                        style=c.get("style", "clip"))
         self.title = None
         if plan.get("title"):
             self.title = title_card(plan["title"]["text"], self.W, plan["title"].get("size", 84))
@@ -665,6 +671,9 @@ class Renderer:
             e = u * u * (3 - 2 * u)
         zoom = z0 + (z1 - z0) * e
         tr = s.get("track")
+        if s.get("fit_z") and tr and tr.get("z"):   # the head only fits smaller: shrink the picture, fill around it
+            k = max(0, int(np.searchsorted(tr["t"], src_t, "right")) - 1)   # a step per scene, not a morph
+            zoom *= min(1.0, tr["z"][min(k, len(tr["z"]) - 1)] / s["fit_z"])
         cx, cy = (0.5, 0.45)
         if tr and len(tr["t"]):
             cx = float(np.interp(src_t, tr["t"], tr["x"]))
@@ -745,6 +754,18 @@ class Renderer:
                 c["sy"] *= max(0.02, 1 + a * e)
             elif typ == "defocus":   # lens defocus, e.g. a focus pull into a new shot
                 c["defocus"] = max(c["defocus"], h.get("px", 14) * a * e)
+            elif typ == "focus":     # focus-hunting cut: rack soft into the cut, then hunt (sharp, soft, sharp)
+                x = t - h["t"]
+                if x < 0:
+                    v = (1 + x / max(h.get("att", 0.2), 1e-3)) ** 2
+                else:
+                    u = min(1.0, x / max(h.get("dur", 0.45), 1e-3))
+                    v = (1 - u) * abs(math.cos(1.5 * math.pi * u))
+                c["defocus"] = max(c["defocus"], h.get("px", 16) * a * v)
+                c["zoom"] *= 1 + 0.025 * a * v   # focus breathing: the frame grows a touch as it goes soft
+            elif typ == "zoomcut":   # zoom cut: push into the cut, the next shot lands close and eases back
+                c["zoom"] *= 1 + h.get("scale", 0.12) * a * e
+                c["zoom_blur"] = max(c["zoom_blur"], 0.12 * a * e)
             elif typ == "edges":     # neon outline flash; the outline grows as it fades
                 c["edges"] = max(c["edges"], a * e)
                 c["edges_color"], c["edges_grow"] = h.get("color", (255, 230, 0)), 1 + h.get("grow", 0.45) * (1 - e)
@@ -793,7 +814,8 @@ class Renderer:
         return c
 
     def _warp(self, s, src, c):
-        fill = "reflect" if self.p.get("edge", "mirror") == "mirror" else "replicate"
+        edge = s.get("edge", self.p.get("edge", "mirror"))   # mirror (motion tile) | blur | stretch
+        fill = {"mirror": "reflect", "blur": "blur"}.get(edge, "replicate")
         layout = s.get("layout", "fill")
         if layout not in ("card", "fit"):
             return fx.camera(src, c["cx"], c["cy"], c["zoom"], c["rot"], c["dx"], c["dy"], self.W, self.H, fill=fill,
@@ -814,7 +836,7 @@ class Renderer:
         if P:
             src_t = s["src_in"] + math.floor((src_t - s["src_in"]) * P) / P
         jolt = {}
-        for h in self.p["hits"]:
+        for h in self.p["hits"] if not s.get("voice") else []:   # speech never stutters
             if h["type"] == "jolt":
                 e = env(t, h)
                 if e > 0:
@@ -837,7 +859,7 @@ class Renderer:
                 acc = f if acc is None else acc + f
             src = (acc / n).astype(np.uint8)
         else:
-            src = rd.get(src_t)
+            src = rd.get(src_t, blend=aspeed < 0.95)   # in-between frames only for slow motion
 
         c = self._camera(s, t, k, src_t, u, jolt)
         img = self._warp(s, src, c)
@@ -866,7 +888,7 @@ class Renderer:
             img = fx.ripple(img, c["ripple"], t - rh["t"], rh.get("x", 0.5), rh.get("y", 0.5), rh.get("wavelength", 90))
         mask = self.mask(img, ("shot", i, k)) if c["rim"] > 0.01 else None
         if c["defocus"] > 0.5:
-            img = cv2.GaussianBlur(img, (0, 0), c["defocus"])
+            img = fx.lens_blur(img, c["defocus"])
         if c["zoom_blur"] > 0.01:
             img = fx.zoom_blur(img, c["zoom_blur"])
         if c["blur_len"] > 3:

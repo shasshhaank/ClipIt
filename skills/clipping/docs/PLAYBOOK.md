@@ -11,10 +11,11 @@ All numbers are at 30 fps. One beat = 1800/BPM frames (130 BPM ≈ 14f ≈ 0.46 
 For "they doubted him" stories, build the doubt out of real voices before the comeback:
 1. **The doubts (about 35–45% of the runtime).**
    - Make a compilation of 3–5 real soundbites of people speaking against him: pundits, news panels, press conferences. Each is 2–4 s and is the sharpest single sentence.
-   - Play each as a `voice` shot (its own audio, with the music ducked) with `captions` so every word reads.
-   - Put headline flashes and dejected or lonely shots of him between them, in mono or dark, with the music sparse or in its quiet intro.
-   - Cut the voices closer and closer together so the pressure builds, and end on the harshest line.
-2. **The turn.** A beat of silence or blackout (a `gap` and a `black` hit), then the moment that answered them, landing on the drop.
+   - Put them in the spec's `dialogue` list (source, start, end). Each plays at normal speed with its own sound, is snapped to whole words, gets small word-by-word subtitles, and joins the next with a focus-hunting cut; the music runs quietly under them.
+   - Read each printed line back. Keep it only if it is a complete thought that says what the story needs.
+   - Headline flashes and dejected or lonely shots of him can follow as the first montage shots, in mono or dark, while the music is still in its quiet intro.
+   - End on the harshest line.
+2. **The turn.** A dark last beat (a `black` hit, or a freeze frame with a `label` across the eyes), then the moment that answered them, landing on the drop. The music keeps playing; the dark beat does the work.
 3. **The comeback (about 45–55%).**
    - Show the performance, the celebration and the proof (stats you verified), in full colour with velocity and jolts.
    - A strong move is a callback: echo one critic's line, then answer it with the result.
@@ -30,30 +31,80 @@ How much the edit does by itself. Clean is about 5 and hyper is 10; when in doub
 
 | level | cuts | effects | sound |
 |---|---|---|---|
-| 1–2 barely edited | every bar, straight speed | none, just the grade and a fade out | music only |
-| 3 minimal | every bar | a blackout and a soft flash on the drop | the drop |
-| 4–5 clean | every 2 beats, gentle ramps | soft punch-ins, a zoom or whip every 4th downbeat, a light drop shake (5) | transitions, riser and text sounds from 5 |
-| 6–7 punchy | hero + quick cuts from 7 | flash and shake on bar lines, bloom on the drop, transitions every 2 beats (7) | all of the above |
-| 8–10 hyper | hero + quick cuts | adds RGB split, glitch and spin transitions, a second drop hit and a pre-drop rumble, all stronger toward 10 | everything |
+| 1–3 minimal | every bar, straight speed | flowing cuts and a fade out, nothing else | music (+ the drop impact from 3) |
+| 4–6 clean (default 5) | every 2 beats, one consistent ramp per clip | flowing cuts, a dark beat before the drop, blinks into bar-line cuts (5), bloom on the drop (6) | the drop, riser and text sounds from 5 |
+| 7–8 punchy | hero + quick cuts | + a small flash and shake on the drop, short jolts on bar lines after the drop | all of the above |
+| 9–10 hyper | hero + quick cuts | + flash and shake on bar lines, a whip or zoom transition every two bars, RGB on the drop | everything |
+
+Effects you write into a spec by hand (`hits`, `zooms`, speeds) always play; the level only governs the automatic ones. Poster frames don't scale with the level. Every level gets flowing cuts and a music bed that never cuts abruptly.
 
 Effects you write into a spec by hand (`hits`, `zooms`, speeds) always play; the level only governs the automatic ones. Poster frames don't scale with the level.
 
+## The house style: clean, beat-synced, meaningful
+Studied from reference edits (a "mogged" meme edit, a wholesome lyric edit, and a step-by-step After Effects tutorial for "hard" fan edits). What they share:
+- **Few cuts, all on the music.** Cuts land on the strong beats (the ones an editor would mark), not on every beat. Inside a shot, the rhythm comes from speed and push, not from effects.
+- **The same treatment on every clip.** One velocity ramp per clip (200% → 60% → 200%, eased like a water slide) and one gentle eased push toward the face. Editors copy the same keyframes onto every clip on purpose: consistency is what reads as "clean".
+- **Framed on the face, from the front.** The subject stays centred with the whole head in frame; pick clips where the face is visible and there is some movement, not extremes.
+- **Setup in real time, then the drop.** The setup plays at normal speed with its own sound (a quote, a meme moment). One beat before the drop the frame freezes, goes black and white and gets a label (e.g. a red bar reading MOGGED across the eyes). On the drop: a hard cut to the best clean footage, in colour.
+- **Dark blinks, not flashes.** Between shots there is at most a dip to black for a frame or two.
+- **A clean close.** A slow push on a hero close-up, then a fade to black while the music fades.
+- **Text is small and in time.** Dialogue text is small (about 4% of the frame width tall), white with a soft glow and shadow, one key word in red, revealed word by word exactly as it's spoken, fading out before the next line.
+- **Wholesome edits** go the other way on colour: bright, saturated, glowing (`bright` look), slow motion, mirror-tile motion, and sometimes lyric typography on black for the intro, each word appearing as it's sung.
+
+Never fill the gaps with random transitions. If an effect isn't motivated by the footage, the words or the music, leave it out.
+
+## Make it mean something
+Plan the edit from its story, fresh each time. Write the beats (what is said or sung, what happens), then choose footage that *shows* each beat:
+- They call him a gangster or a villain: him putting on sunglasses, a slow walk, a stare into the lens.
+- A nerd, a sweetheart, a wholesome turn: bright, colourful slow motion (`bright` look), smiles, hugs, tears catching the light (`hdr` or bloom on the close-up).
+- Doubt and criticism: mono or dark grade, lonely or dejected shots, real voices saying it.
+- The answer: the performance and the proof, in full colour, on the drop.
+Effects follow the same rule: a whip only when the subject or camera moves that way, a flash only on a real flash or a camera shutter, a zoom only to reveal something.
+
+## Flowing cuts
+A hard cut between unrelated shots, or a jump cut in a talking clip, breaks the flow. Every cut is one of these instead (automatic in `talk`, `edit` and `story`):
+- **Focus-hunting cut** (`focus` hit). Studied from explainer-style motion graphics: the old shot racks soft over the last 0.1–0.2 s, the cut happens while everything is blurred, then the new shot hunts for focus (nearly sharp, briefly soft again, then sharp) over 0.3–0.45 s, the frame breathing a touch as focus moves. Use the full, slow version between dialogue lines and quiet shots, and a quick one on beat cuts, so the hit still lands on the beat.
+- **Zoom cut** (`zoomcut` hit). The old shot pushes in over the last 0.1 s, the new shot lands pushed in and eases back over 0.3 s, so the motion carries across the cut. The default for silence trims in talking clips, where it also alternates wide and tight framing like a two-camera shoot.
+Choose with `"cuts": "focus" | "zoom" | "hard"` in a spec (or `--cuts` for `talk`), and per shot with `"cut"`.
+
+## Framing 16:9 footage for 9:16
+A 9:16 crop of 16:9 footage is only 56% of its width, so a close-up head is often wider than the frame. The framing is automatic:
+- Faces are found a few times a second (OpenCV's YuNet model) and followed; in a two-shot the camera follows whoever is speaking (mouth movement) and switches with a cut, never a pan.
+- The eyes sit on the upper third (about 38% down the frame), with a little headroom.
+- Each scene gets a zoom limit: the closest the camera may get with the whole head (hair, ears, chin) inside the frame. When even the plain crop is too close, the picture is shown smaller and the space above and below is filled: mirrored copies (motion tile, `"edge": "mirror"`, the edit default) or a blurred copy (`"edge": "blur"`, the clip-page default).
+- Zoom moves are clamped to that limit, so a push-in never ends with a cropped face.
+- Override with `cx`/`cy` (manual centre) or `"fit": false` on a shot.
+
+## Dialogue that syncs and makes sense
+- Speech always plays at normal speed with its own sound. Dialogue shots never get speed ramps, jolts or stepped fps.
+- Lines are cut on whole words (the `dialogue` list snaps your start and end to the transcript) and should be whole sentences; `story` warns when a line stops mid-sentence.
+- Read every printed line back against the user's story before rendering. A line that doesn't say what the story needs, or only says it out of context, goes.
+- Dialogue comes before the montage: the lines play first, timed by the words, and the beat-timed montage starts where they end. The song starts earlier so it runs under the lines, ducked.
+
+## Music that never cuts
+- Start on a downbeat with a short fade-in (or at the song's own start).
+- Keep the bed continuous under jump cuts and dialogue: it ducks smoothly under speech (60 ms down, 450 ms back up) and never mutes.
+- No dropouts: don't dip the music for "gaps" unless the song itself breaks there.
+- End on a bar line (the `edit` planner rounds the length to whole bars) with a long fade-out of about 1.5 s, while the picture fades to black and the low end falls away.
+
 ## Cutting to music
-- Cuts land ON the beat (kick). Build-up: every 2 beats, then every beat in the final half-bar. Drop: a hero shot (2 beats, velocity ramp), then 1-beat quick cuts, with a hero on every downbeat.
-- Velocity ramp: fast (350–450%) → slow (25%) → fast, U-shaped, with the slow part on the action peak. Speed into the cut, not out of it.
+- Cuts land ON the beat (kick). Build-up: every 2 beats (every bar at levels 1–4). After the drop: a hero shot (2 beats, velocity ramp) on every bar line, with 1-beat quick cuts between them from level 7.
+- Velocity ramp: 200% → 60% → 200%, eased, the same on every clip (`velocity`), with the slow part on the action peak. Speed into the cut, not out of it.
 - Build-up shots: constant 40–50% smooth slow-mo (motion-interpolated).
-- Silence or a tape stop 0.5–1 beat before the drop is a fake-out; the riser ends exactly on the drop.
+- A dark last beat before the drop is the fake-out; the riser ends exactly on the drop.
 
 ## Effects menu (what fires when)
-| Moment | Effect | Parameters |
+| Moment | Effect | Level |
 |---|---|---|
-| THE DROP | white flash + heavy shake + zoom transition + RGB split + impact/boom SFX, then 1 bar of flicker | flash 4–5f, shake 60px/18 Hz decaying over 15f, zoom 200%→100% |
-| Downbeat cut | flash + shake | flash 3f, shake 50px/16 Hz for 9f |
-| Strong beat | RGB split | 22px fading over 4–5f |
-| Other cuts | punch-in + exposure pulse | +10% zoom easing back over 8f |
-| Every 2nd downbeat post-drop | transition: zoom-in / whip / spin / glitch (rotating) + whoosh 0.38 s early | 3f attack, 4f release |
-| Talk keywords | punch-in +8% (and light shake on the hardest words) | 14f |
-| Jump cuts (talk) | alternate 100% / 118% framing | gives a 2-camera feel |
+| Every cut | focus-hunting cut (zoom cut in talking clips) | all |
+| Bar-line cut | a dip to dark into the cut | 5+ |
+| The beat before the drop | fade to black | 4+ |
+| THE DROP | a hard cut to clean footage; bloom (6+); a small flash and shake (7+); RGB and a second hit (9+) | by level |
+| Bar lines after the drop | a short jolt (7+); flash and shake (9+) | 7+ |
+| Every two bars after the drop | whip or zoom transition | 9+ |
+| Talk keywords | punch-in +8% (and light shake on the hardest words at 8+) | 4+ |
+| Jump cuts (talk) | zoom cut, alternating wide / tight framing | all |
+| The end | fade to black over the last beat, music fading out | all |
 
 ## How pros build these edits (studied from real project files)
 Patterns that came up again and again in working After Effects projects for velocity, gym, lyric and emotional edits.
@@ -67,7 +118,7 @@ Patterns that came up again and again in working After Effects projects for velo
 - It starts bright and holds, then sinks toward black in the last frames before the cut, so every cut "blinks".
 - A small jolt or shake peaks on the cut.
 
-`story` and `edit` add the zoom settle from level 4, the focus pull from level 5 and the blink from level 6.
+`story` and `edit` give every shot the same gentle push and a flowing cut, and add the blink into bar-line cuts from level 5.
 
 **Transitions they actually use:**
 - Full-width slide with mirror edges (`whip`, `dist` 1): accelerate out of the old shot, decelerate into the new one.
@@ -89,7 +140,7 @@ Patterns that came up again and again in working After Effects projects for velo
 - Lyrics and dialogue are small (55–70 px), in italic, handwritten or condensed faces, and revealed word by word (`anim: "words"`) over 0.6–1.3 s.
 - They fade out over the last 0.15–0.3 s, with glow plus a soft dark halo (`glow_color` [0, 0, 0]).
 - They're sometimes turned sideways (`rot` 90) or filled with a gradient (`gradient`).
-- When a subject moves, pros track the text to them. That isn't automatic here yet, so place the text in clear space instead.
+- When a subject moves, pros track the text to them (`follow`, which rides with the face).
 
 **Texture:** a constant subtle film flicker (`film_flicker` 0.12–0.2), light, particle or shadow overlay clips in screen blend, tinted to the edit's colour (`overlays`), and the sharpen + clarity + look stack (`crisp4k`).
 
@@ -99,7 +150,7 @@ Patterns that came up again and again in working After Effects projects for velo
 - Sounds follow the picture. Each transition has its own sound (whoosh for zoom and spin, swoosh for whip, glitch for glitch), and every zoom-chain move gets a short swish. The drop gets a riser that ends on it, then impact + boom. Slam text gets a hit, pop text a pop, and typed text quiet key presses.
 - Set levels against the music, not in absolute terms. The drop sits about 13 dB under the track, transitions about 20 dB under, and small details (clicks, pops, typing) 26–32 dB under. You should feel them, not notice them; if a click or swoosh stands out on playback, it is too loud.
 - One sound per moment. If a slam lands on the drop, the drop's impact covers it.
-- Leave a gap. Pros dip the music 10–20 dB for 3–7 frames right before a drop or a big cut, so the hit lands in silence (`gap` hits; automatic before the drop from level 5 and before transitions from level 7). As the edit ends, the low end falls away (automatic from level 3).
+- The music never drops out on its own. A `gap` hit (a dip of a few frames before a moment) exists for the rare case the user wants one, but it isn't automatic: viewers hear it as the music cutting. As the edit ends, the low end falls away (automatic from level 3) and the track fades out over about 1.5 s.
 - Leave smooth sections (`mix` dissolves, slow-motion holds) quiet.
 
 ## Looks
