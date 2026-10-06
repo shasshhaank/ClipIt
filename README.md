@@ -5,6 +5,7 @@ An open-source clipping studio and a skill for Claude. It turns long videos into
 - **Find the moment:** word-level transcription, then a ranked list of the most polarizing, hook-heavy windows.
 - **Clip-page shorts:** face-framed 9:16, silences trimmed with zoom cuts, word-by-word captions, punch-ins on charged words, a hook title and a continuous, ducked music bed.
 - **Clean, beat-synced edits:** cuts on the strong beats, the same velocity ramp and gentle push on every clip, flow slow-mo, focus-hunting cuts, a dark beat before the drop and a clean fade-out. A level from 1 to 10 decides how much more fires (5 is clean, 10 is hyper).
+- **YouTube's own subtitles first:** footage fetched from YouTube brings its own subtitles (the uploader's, else YouTube's captions in the spoken language, never a translation); Whisper is only the fallback.
 - **Dialogue, then montage:** real lines play first, in sync and cut on whole words, with small word-by-word subtitles, then the montage starts on the music.
 - **Framing that keeps faces whole:** faces are found and followed (the speaker in a two-shot), eyes on the upper third; a head too big for the vertical frame is shown smaller with mirrored (motion tile) or blurred fill instead of being cropped.
 - **Effects when they mean something:** flow slow-mo, vector blur, jolts, bloom, lens defocus, light rays and sweeps, halftone, ripples, poster-style typography frames, glowing text, labels, thumbnail walls, comment cards, logo and subscribe end cards, and grades including `crisp4k`, `hdr` and `bright`.

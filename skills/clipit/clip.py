@@ -175,18 +175,21 @@ def cmd_find(a):
         if a.max_minutes and dur > a.max_minutes * 60:
             continue
         url = e.get("url") if str(e.get("url", "")).startswith("http") else f"https://www.youtube.com/watch?v={e['id']}"
-        size = height = None
-        if not a.no_sizes:   # size and height of the format `fetch` would pick (capped at --res)
+        size = height = subs = None
+        if not a.no_sizes:   # size and height of the format `fetch` would pick (capped at --res), and subtitles
             m = _ytdlp_json("-S", f"res:{a.res},ext:mp4:m4a", "--", url)
             fmts = m.get("requested_formats") or [m]
             size = sum((f.get("filesize") or f.get("filesize_approx") or 0) for f in fmts) / 1e6 or None
             height = max((f.get("height") or 0) for f in fmts) or None
+            from clipper.ytsubs import pick
+            subs = pick(m)
         rows.append(dict(title=e.get("title", ""), channel=e.get("channel") or e.get("uploader") or "", seconds=dur,
-                         views=e.get("view_count"), size_mb=round(size) if size else None, height=height, url=url))
+                         views=e.get("view_count"), size_mb=round(size) if size else None, height=height, url=url,
+                         subs=f"{subs[0]} subs ({subs[1].split('-')[0]})" if subs else "no subs"))
     for i, r in enumerate(rows):
         print(f"{i + 1:2d}. {r['title'][:72]}\n    {r['channel']} | {r['seconds'] // 60}:{r['seconds'] % 60:02d} | "
               f"{r['views'] or '?'} views | {str(r['height']) + 'p' if r['height'] else '?p'} | "
-              f"{str(r['size_mb']) + ' MB' if r['size_mb'] else 'size ?'} | {r['url']}")
+              f"{str(r['size_mb']) + ' MB' if r['size_mb'] else 'size ?'} | {r['subs']} | {r['url']}")
     os.makedirs(os.path.join(CWD, "work"), exist_ok=True)
     json.dump(rows, open(os.path.join(CWD, "work", "find.json"), "w"), indent=1)
     if not rows:
@@ -208,9 +211,15 @@ def cmd_fetch(a):
         if not url.startswith(("https://", "http://")):   # a "link" like --exec=... must never reach yt-dlp
             sys.exit(f"not a web link: {url}")
     print("Only download what you own or have permission to use.")
+    from clipper import ytsubs
     for url in a.urls:
-        subprocess.run([sys.executable, "-m", "yt_dlp", "--no-playlist", *fmt, "--print", "after_move:filepath",
-                        "-o", os.path.join(dst, name), "--", url], check=True)
+        r = subprocess.run([sys.executable, "-m", "yt_dlp", "--no-playlist", *fmt, "--print", "after_move:filepath",
+                            "-o", os.path.join(dst, name), "--", url], check=True, stdout=subprocess.PIPE, text=True)
+        for path in [x.strip() for x in r.stdout.splitlines() if x.strip()]:
+            print(path)
+            if not a.audio:   # the video's own subtitles, used before Whisper
+                got = ytsubs.save(url, path)
+                print(f"  subtitles: {got}" if got else "  subtitles: none on YouTube (Whisper will be used)")
 
 
 def cmd_talk(a):

@@ -7,5 +7,7 @@ pillow>=10
 pyloudnorm
 yt-dlp                   # footage and music from links (`clip.py fetch`)
 imageio-ffmpeg           # a bundled ffmpeg, so no Homebrew or system install is needed
+uharfbuzz                # correct lettering for Hindi and other joined scripts
+freetype-py
 mlx-whisper; platform_system == "Darwin" and platform_machine == "arm64"
 faster-whisper; platform_system != "Darwin" or platform_machine != "arm64"

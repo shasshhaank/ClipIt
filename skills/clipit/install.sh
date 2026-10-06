@@ -6,8 +6,7 @@
 #   --with-cutout  also install the optional subject cut-out (rembg, about 200 MB), for text behind people and rim
 #                  light. Only when the user asks for one of those.
 #   --with-hindi   OpenAI's full Whisper large-v3 model (about 3 GB) for Hindi and other languages the fast model
-#                  gets wrong, plus correct Hindi text shaping and a Devanagari font. Only when the user wants
-#                  subtitles for such a video.
+#                  gets wrong. Only when the user wants subtitles for such a video and YouTube has none for it.
 set -euo pipefail
 cd "$(dirname "$0")"
 HOME_DIR="${CLIPIT_HOME:-$HOME/.clipit}"
@@ -42,7 +41,7 @@ fi
 # free display fonts (SIL Open Font License, via the Google Fonts API) for poster frames and labels;
 # optional, system fonts are used otherwise
 for pair in "Anton|Anton-Regular.ttf" "Archivo+Black|ArchivoBlack-Regular.ttf" "Space+Mono:wght@700|SpaceMono-Bold.ttf" \
-            "Amatic+SC:wght@700|AmaticSC-Bold.ttf"; do
+            "Amatic+SC:wght@700|AmaticSC-Bold.ttf" "Noto+Sans+Devanagari:wght@700|NotoSansDevanagari-Bold.ttf"; do
   n="$HOME_DIR/fonts/${pair#*|}"
   [ -f "$n" ] && continue
   url=$(curl -fsS "https://fonts.googleapis.com/css2?family=${pair%%|*}" | grep -o 'https://[^)]*\.ttf' | head -1) || url=""

@@ -82,6 +82,7 @@ A 9:16 crop of 16:9 footage is only 56% of its width, so a close-up head is ofte
 - Read every printed line back against the user's story before rendering. A line that doesn't say what the story needs, or only says it out of context, goes.
 
 ## Subtitles: only when the language is certain
+- YouTube's own subtitles come first. `fetch` saves them with the video (the uploader's in the spoken language, else YouTube's automatic captions in the spoken language, never a translated track), and they replace Whisper entirely for that video.
 - The spoken language is measured before transcribing, over several stretches of the speech. Subtitles appear only at 80%+ confidence and with a model that handles the language. Hindi and Urdu count as one language, and Hindi that's clearly present (25%+, as in Hinglish commentary) makes the clip Hindi.
 - Whisper is always told which language to write, so it never turns Hindi speech into English text. With an unsure or mixed language, or Hindi on the fast model, there are no subtitles at all.
 - Hindi subtitles need OpenAI Whisper's full model; ask the user once whether to install it (`install.sh --with-hindi`) or go without.

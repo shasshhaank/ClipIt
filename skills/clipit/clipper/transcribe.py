@@ -4,7 +4,8 @@ language detection with a confidence, and cutting speech only at real pauses.
 Two models: "turbo" (large-v3-turbo, the default: fast, about 1.5 GB) and "large" (the full large-v3, about 3 GB),
 which is far better at Hindi and the other languages turbo handles poorly.
 
-Subtitles are shown only when the language is certain. Whisper is always told which language to write, so it never
+YouTube's own subtitles come first: when `fetch` saved them next to a video, they are used and no speech model runs.
+Otherwise subtitles are shown only when the language is certain. Whisper is always told which language to write, so it never
 "helpfully" translates Hindi into English; and when the language is uncertain, or Hindi with the fast model, there
 are no subtitles at all (the word timings are still used for cutting)."""
 import json
@@ -67,6 +68,13 @@ def transcribe(src, cache_dir, model=None, language=None):
     """Transcript {language, lang_conf, lang_probs, segments, words, model}, cached in cache_dir."""
     model = model or os.environ.get("CLIPIT_WHISPER", "turbo")
     os.makedirs(cache_dir, exist_ok=True)
+    yt = os.path.splitext(src)[0] + ".subs.json"   # YouTube's own subtitles, saved by `fetch`, come first
+    if os.path.exists(yt):
+        if not os.path.exists(os.path.join(cache_dir, "speech16k.wav")):
+            extract_audio(src, os.path.join(cache_dir, "speech16k.wav"), sr=SR, mono=True)
+        data = json.load(open(yt))
+        print(f"  using {data.get('source', 'YouTube')} subtitles ({data.get('language')}) instead of Whisper")
+        return data
     out = os.path.join(cache_dir, "transcript.json")
     if os.path.exists(out):
         data = json.load(open(out))
@@ -110,6 +118,8 @@ def transcribe(src, cache_dir, model=None, language=None):
 def captions_ok(tr):
     """Subtitles only when the language is certain and the model handles it (Hindi and other Indic speech need the
     large model). Uncertain or unknown language: no subtitles, never a translation."""
+    if tr.get("model") == "youtube":   # YouTube's own subtitles: the language is the track's, the words are YouTube's
+        return True
     conf = tr.get("lang_conf", 0.0)
     if tr.get("language") in WEAK_IN_TURBO:
         return tr.get("model") == "large" and conf >= 0.6
@@ -120,6 +130,8 @@ def line_ok(tr, src, s0, s1):
     """captions_ok for one spoken line: the line itself must also clearly be in the transcript's language."""
     if not captions_ok(tr):
         return False
+    if tr.get("model") == "youtube":
+        return True
     p = detect_language(load_audio(src, SR, mono=True, start=s0, dur=s1 - s0)[0], tr.get("model", "turbo"))
     need = 0.6 if tr.get("language") in WEAK_IN_TURBO else SURE
     return p.get(tr.get("language"), 0.0) >= need
