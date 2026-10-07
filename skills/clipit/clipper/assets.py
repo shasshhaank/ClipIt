@@ -62,6 +62,26 @@ def circle_logo(src, dst, size=900):
     return dst
 
 
+def emoji_png(ch, size, dst):
+    """A colour emoji as a PNG (Apple Color Emoji on macOS, Noto Color Emoji on Linux); None without such a font."""
+    for path in ("/System/Library/Fonts/Apple Color Emoji.ttc", "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+                 "/usr/share/fonts/noto/NotoColorEmoji.ttf"):
+        for fs in (160, 109):   # colour emoji fonts only render at their built-in sizes
+            try:
+                f = ImageFont.truetype(path, fs)
+            except OSError:
+                continue
+            im = Image.new("RGBA", (fs * 2, fs * 2))
+            ImageDraw.Draw(im).text((fs // 4, fs // 4), ch, font=f, embedded_color=True)
+            if im.getbbox():
+                im = im.crop(im.getbbox())
+                k = size / max(im.size)
+                im.resize((max(1, int(im.width * k)), max(1, int(im.height * k))), Image.LANCZOS).save(dst)
+                return dst
+    print(f"  ! no colour emoji font: skipping {ch!r} (use an image instead)")
+    return None
+
+
 def mask_handle(h):
     """Privacy: '@someone123' -> '@so•••••' (show only the first two characters)."""
     h = h.lstrip("@")

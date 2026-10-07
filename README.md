@@ -9,7 +9,9 @@ An open-source clipping studio and a skill for Claude. It turns long videos into
 - **Dialogue, then montage:** real lines play first, in sync and cut on whole words, with small word-by-word subtitles, then the montage starts on the music.
 - **Framing that keeps faces whole:** faces are found and followed (the speaker in a two-shot), eyes on the upper third; a head too big for the vertical frame is shown smaller with mirrored (motion tile) or blurred fill instead of being cropped.
 - **Effects when they mean something:** flow slow-mo, vector blur, jolts, bloom, lens defocus, light rays and sweeps, halftone, ripples, poster-style typography frames, glowing text, labels, thumbnail walls, comment cards, logo and subscribe end cards, and grades including `crisp4k`, `hdr` and `bright`.
-- **Audio:** a generated, copyright-free sound kit placed quietly under the music, smooth sidechain ducking, music that starts on a downbeat and ends on a bar line, slowed + reverb or sped-up versions, and loudness at −14 LUFS.
+- **Clip formats:** aura/drop clips, karaoke recaps (the whole phrase up, each word lighting up as it's said) and split-screen reaction clips, with glowing eyes, colour emoji that follow the face, bleeps, and 9:16, 4:5, 3:4 or 1:1 output.
+- **Learn from references:** `study` measures other edits (pacing, grade changes, loudness, drops) and makes sheets to read them by eye; `match-look` fits a colour LUT to a reference's grade; `locate` finds the raw moment a short was cut from.
+- **Audio:** a generated, copyright-free sound kit placed quietly under the music, smooth sidechain ducking, music that starts on a downbeat and ends on a bar line, slowed + reverb or sped-up versions, and loudness at −14 LUFS. A no-music version can be exported for posting with the app's licensed sound, with the second to start the song at.
 
 Everything runs locally with Python, OpenCV and ffmpeg. The tool has no telemetry and uploads nothing; its only network use is the one-time setup, the speech model (when a job needs it) and any links you ask it to fetch. It also understands effect names from popular desktop and mobile editors and rebuilds them ([`docs/TRANSLATE.md`](skills/clipit/docs/TRANSLATE.md)).
 
@@ -52,7 +54,10 @@ $PY $CLIP analyze input/podcast.mp4 --shots          # transcript, ranked moment
 $PY $CLIP sheet input/podcast.mp4 --n 30             # contact sheet for picking shots
 $PY $CLIP talk input/podcast.mp4 --start 812 --end 851 --title "HE SAID WHAT?" --music music/bed.mp3
 $PY $CLIP edit input/game.mp4 --music music/phonk.mp3 --length 14 --flow
-$PY $CLIP plan-render work/podcast/plan.json output/v2.mp4
+$PY $CLIP plan-render work/podcast/plan.json output/v2.mp4 --draft   # fast preview; every render also writes a contact sheet
+$PY $CLIP study https://youtu.be/VIDEO_ID input/ref.mp4  # measure reference edits -> refs/<name>/report.md
+$PY $CLIP match-look input/ref.mp4 input/game.mp4 --out looks/ref.cube   # use the .cube as a "look"
+$PY $CLIP locate input/full_stream.mp4 input/short.mp4   # where a short was cut from
 ```
 
 Outputs go to `./output/` and intermediates to `./work/`, both relative to where you run the command.
@@ -72,6 +77,7 @@ When a render is done, upload it to **[postxport.com](https://postxport.com)** t
 | Plan | `planner.py`, `story.py` | cut grid, speed curves, flowing cuts, effect choreography and the audio mix |
 | Render | `render.py`, `fx.py`, `flow.py` | frame-accurate time remap, one-warp camera, effects, grade, text and image layers, piped to ffmpeg |
 | Overlays | `captions.py`, `assets.py` | Pillow text (no libass), cards, buttons, cursor and logo cut-outs |
+| References | `study.py` | scene cuts, look and grade-change measures, loudness and drops; audio cross-correlation (`locate`); LUT fitting (`match-look`) |
 
 Docs: [`PLAYBOOK.md`](skills/clipit/docs/PLAYBOOK.md) (the editing rules), [`EFFECTS.md`](skills/clipit/docs/EFFECTS.md) (every effect), [`STORY_SPEC.md`](skills/clipit/docs/STORY_SPEC.md) (the story format), [`TRANSLATE.md`](skills/clipit/docs/TRANSLATE.md) (other editors' names mapped to ours).
 
@@ -82,7 +88,7 @@ Docs: [`PLAYBOOK.md`](skills/clipit/docs/PLAYBOOK.md) (the editing rules), [`EFF
 - ClipIt is an independent project. It isn't made or endorsed by Anthropic, or by the makers of any editor or plugin named in `docs/TRANSLATE.md`.
 
 ## Credits
-Face detection uses OpenCV's YuNet model (MIT license, from the OpenCV Zoo). The display fonts the installer fetches (Anton, Archivo Black, Space Mono, Amatic SC) are under the SIL Open Font License.
+Face detection uses OpenCV's YuNet model (MIT license, from the OpenCV Zoo). The display fonts the installer fetches (Anton, Archivo Black, Space Mono, Amatic SC, Montserrat, Noto Sans Devanagari) are under the SIL Open Font License.
 
 ## License
 MIT © [Shashank Pandey](https://shashankpandey.com) · [LinkedIn](https://www.linkedin.com/in/xhashank). See [LICENSE](LICENSE).

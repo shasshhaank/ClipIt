@@ -14,9 +14,9 @@ import numpy as np
 from . import assets
 from . import audio as A
 from .beats import analyze
-from .media import load_audio, probe, save_audio
+from .media import load_audio, probe
 from .moments import STILL_ON_SCREEN, action_window, looks_like_slideshow, looks_still
-from .planner import _track, fit, lv
+from .planner import ASPECTS, _track, fit, lv, save_mix
 from .render import remap_table
 
 SPEEDS = {
@@ -181,6 +181,16 @@ def readable(texts, end, opts=None):
               f"let the footage and the music carry the rest.")
 
 
+def _follow(item, shots, dy, below=None):
+    """A track for text or a picture to ride on the eyes of the shot it starts on (dy px below them, or `below`
+    eye-spacings, which scales with the face)."""
+    sh = next((x for x in shots if x["out"][0] <= item["t0"] < x["out"][1]), shots[-1])
+    fo = item["follow"] if isinstance(item["follow"], dict) else {}
+    tr = sh["track"]
+    return dict(t=tr["t"], x=tr["ex"], y=tr["ey"], src=sh["src"], dx=fo.get("dx", 0), dy=fo.get("dy", dy),
+                below=fo.get("below", below), eyes=tr.get("eyes"))
+
+
 def _speech(spec, src, workdir):
     """The transcript of a source (None when no speech model is installed)."""
     try:
@@ -231,6 +241,9 @@ def _dialogue(spec, P, workdir, edge):
 
 def build(spec, workdir, base_dir="."):
     P = lambda p: p if os.path.isabs(p) else os.path.join(base_dir, p)
+    for s in [spec] + spec["shots"] + [s[k] for s in spec["shots"] for k in ("top", "bottom") if k in s]:
+        if str(s.get("look", "")).endswith(".cube"):   # a fitted LUT (match-look) is a file like any other
+            s["look"] = P(s["look"])
     os.makedirs(workdir, exist_ok=True)
     m = spec["music"]
     bt = Beats(P(m["path"]), m.get("drop", "auto"), m.get("bars_before", 5), m.get("bars_after", 7))
@@ -249,6 +262,23 @@ def build(spec, workdir, base_dir="."):
     for s in sorted(spec["shots"], key=lambda x: x["from"]):
         o0 = intro if s["from"] == first else bt(s["from"])
         o1 = until(s["to"])
+        if s.get("layout") == "split":   # two feeds stacked top/bottom, playing in real time with their own sound
+            panels = []
+            for key in ("top", "bottom"):
+                q = s[key]
+                src = P(q["src"])
+                dur, span = probe(src)["duration"], o1 - o0
+                src_in = float(np.clip(q["start"] if "start" in q else q.get("peak", dur / 2) - span / 2, 0, max(0, dur - span)))
+                tr = _track(src, src_in, src_in + span)
+                fz, zoom = fit(tr, q.get("zoom", [1.0, 1.04]))
+                panels.append(dict({k: q[k] for k in ("cx", "cy", "look") if k in q}, src=src, out=[o0, o1], src_in=src_in,
+                                   src_span=span, profile={"type": "const", "speed": 1.0}, zoom=zoom, fit_z=fz, track=tr,
+                                   layout="fill", edge=s.get("edge", edge), look=q.get("look", s.get("look", spec.get("look", "teal_orange")))))
+                if s.get("audio", "mix") in (key, "mix"):
+                    voices.append((src, src_in, span, o0))
+            shots.append(dict(panels[0], split=panels, voice=True, captions=False))
+            print(f"  shot {s['from']:>6}..{s['to']:<6} split: {os.path.basename(panels[0]['src'])} / {os.path.basename(panels[1]['src'])}")
+            continue
         sp = s.get("speed", "normal")
         if s.get("voice") and sp not in ("normal", 1, 1.0):
             print(f"  ! shot {s['from']}..{s['to']} carries a voice, so it plays at normal speed (speed '{sp}' ignored)")
@@ -356,16 +386,20 @@ def build(spec, workdir, base_dir="."):
         st["t0"] = bt(tx["from"]) + (0.04 if st.get("anim") == "type" else 0)
         st["t1"] = until(tx["to"])
         if st.get("follow"):   # ride along with the subject of the shot it starts on
-            sh = next((x for x in shots if x["out"][0] <= st["t0"] < x["out"][1]), shots[-1])
-            tr = sh["track"]
-            fo = st["follow"] if isinstance(st["follow"], dict) else {}
-            st["follow_track"] = dict(t=tr["t"], x=tr["ex"], y=tr["ey"], src=sh["src"],   # rides on the eyes
-                                      dx=fo.get("dx", 0), dy=fo.get("dy", -260))
+            st["follow_track"] = _follow(st, shots, -260)
         texts.append(st)
-    for im in spec.get("images", []):
+    for n, im in enumerate(spec.get("images", [])):
         d = {k: v for k, v in im.items() if k not in ("from", "to")}
-        d.update(path=P(im["path"]), t0=bt(im["from"]), t1=bt(im["to"]))
-        images.append(d)
+        d.update(t0=bt(im["from"]), t1=until(im["to"]))
+        if "emoji" in im:   # a colour emoji, e.g. on the chest at the drop
+            d.update(path=assets.emoji_png(im["emoji"], im.get("w", 300), os.path.join(workdir, f"emoji{n}.png")),
+                     w=im.get("w", 300), y=im.get("y", 1190), anim=im.get("anim", "pop"))
+        else:
+            d["path"] = P(im["path"])
+        if d.get("follow"):
+            d["follow_track"] = _follow(d, shots, 0, below=3.5)   # on the chest
+        if d["path"]:
+            images.append(d)
 
     overlays = []   # user-supplied overlay clips (light leaks, particles, dust), blended over the footage
     for o in spec.get("overlays", []):
@@ -522,15 +556,23 @@ def build(spec, workdir, base_dir="."):
             mix = A.dip(mix, h["t"] - h.get("dur", 0.12), h["t"], h.get("db", -18))
     if L >= 3:   # the track loses its low end as the edit ends
         mix = A.thin_out(mix, END - 0.8, 0.8)
+    vb = np.zeros_like(mix)
     if voices:   # soundbites over the music: speech sits just above the track, the music ducks under it
-        vb, srcs = np.zeros_like(mix), {}
+        srcs = {}
         for src, s0, span, o0 in voices:
             if src not in srcs:
                 srcs[src] = load_audio(src, A.SR)
             A.place(vb, A.fade(srcs[src][:, int(s0 * A.SR):int((s0 + span) * A.SR)], 0.03, 0.08), o0)
         g = A.duck_envelope(vb, depth_db=spec.get("voice_duck", -14))
         vb *= 10 ** ((A.ref_db(mix) + 1 - A._rms_db(vb)) / 20)
-        mix = mix * g[None, :mix.shape[1]] + vb
+        for b in spec.get("bleeps", []):   # censor: the word drops out under a 1 kHz tone
+            t0, d = (b["t"] if "t" in b else bt(b["at"])), b.get("dur", 0.35)
+            vb[:, int(t0 * A.SR):int((t0 + d) * A.SR)] *= 0.03
+            tt = np.arange(int(d * A.SR)) / A.SR
+            tone = np.sin(2 * np.pi * 1000 * tt) * np.clip(np.minimum(tt, d - tt) / 0.01, 0, 1) * 10 ** (A._rms_db(vb) / 20)
+            A.place(vb, np.stack([tone, tone]).astype(np.float32), t0)
+        mix = mix * g[None, :mix.shape[1]]
+    mix = mix + vb
     if spec.get("sfx", True) and L >= 3:   # sound follows the level: none at 1-2, details from 5
         ev = [(DROP - 0.01, "drop")] + [(DROP, "riser")] * (L >= 5)
         ev += [(h["t"], h["_sfx"]) for h in hits if h.get("_sfx")]
@@ -549,12 +591,13 @@ def build(spec, workdir, base_dir="."):
                 ev += [(tx["t0"] + j * step, "typing", 0.0, j % 4) for j, ch in enumerate(tx["text"]) if ch not in " []"]
         if click is not None:
             ev.append((click, "click"))
-        A.mix_sfx(mix, ev, A.ref_db(mix))
+        fx_bus = np.zeros_like(mix)
+        A.mix_sfx(fx_bus, ev, A.ref_db(mix))
+        mix += fx_bus
+        vb += fx_bus   # the no-music version keeps speech and sound effects
     for h in hits:
         h.pop("_sfx", None)
-    mix = A.normalize(mix)
-    apath = os.path.join(workdir, "mix.wav")
-    save_audio(apath, mix, A.SR)
+    apath, nomusic = save_mix(workdir, mix, vb if spec.get("export_no_music") else None)
 
     readable(texts, END, spec.get("reading", {}))
 
@@ -563,13 +606,21 @@ def build(spec, workdir, base_dir="."):
     on = np.clip(on / (np.percentile(on, 97) + 1e-9), 0, 1)
     on = np.maximum(on, np.concatenate([[0], on[:-1]]) * 0.6)
 
-    plan = {"fps": 30, "width": 1080, "height": 1920, "look": spec.get("look", "teal_orange"),
+    H = ASPECTS[spec.get("aspect", "9:16")]
+    for item in texts + images if H != 1920 else []:   # positions are written for a 1920-tall frame; scale them
+        item["y"] = item.get("y", 960) * H / 1920
+        if item.get("follow_track"):
+            item["follow_track"]["dy"] *= H / 1920
+        if item.get("kf"):
+            item["kf"] = [[k[0], k[1], k[2] * H / 1920, k[3]] for k in item["kf"]]
+    plan = {"fps": 30, "width": 1080, "height": H, "look": spec.get("look", "teal_orange"),
             "duration": END, "shots": shots, "hits": hits, "texts": texts, "images": images, "audio": apath,
             "motion_blur": spec.get("motion_blur", "flow"), "fx": spec.get("fx", {}),
             "letterbox": spec.get("letterbox", 0), "audio_env": on.tolist(), "overlays": overlays,
             "captions": {"words": cap_words, "source_time": False, "y": spec.get("caption_y", 0.7),
                          "style": spec.get("caption_style", "edit")} if cap_words else None,
-            "music": {"path": P(m["path"]), "start": bt.M0, "tempo": bt.ma["tempo"], "drop_out": DROP}}
+            "music": {"path": P(m["path"]), "start": bt.M0, "tempo": bt.ma["tempo"], "drop_out": DROP},
+            "audio_nomusic": nomusic, "song_start": round(bt.M0 - intro, 2)}
     return plan
 
 

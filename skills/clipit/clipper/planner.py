@@ -36,6 +36,21 @@ def fit(track, zoom):
     return max(z0, z1), [z0, z1]
 
 
+ASPECTS = {"9:16": 1920, "4:5": 1350, "3:4": 1440, "1:1": 1080}   # output height at 1080 wide
+
+
+def save_mix(workdir, mix, nomusic=None):
+    """Write the mix, plus (when asked) a version without the music, to post with the platform's own sound."""
+    os.makedirs(workdir, exist_ok=True)
+    apath = os.path.join(workdir, "mix.wav")
+    save_audio(apath, A.normalize(mix), SR)
+    if nomusic is None:
+        return apath, None
+    npath = os.path.join(workdir, "mix_nomusic.wav")
+    save_audio(npath, A.normalize(nomusic), SR)
+    return apath, npath
+
+
 def lv(level, on):
     """How strongly an effect fires at edit `level` (1 = barely edited, 5 = clean, 10 = hyper):
     0 below `on`, 0.55 at `on`, rising to 1.0 at 10."""
@@ -44,7 +59,8 @@ def lv(level, on):
 
 # =================================================================== TALK CLIP
 def talk_plan(src, start, end, transcript, workdir, music=None, music_start=None, layout="fill",
-              title=None, look="punchy", trim_silence=True, music_db=-20, level=5, cuts="zoom", captions=True):
+              title=None, look="punchy", trim_silence=True, music_db=-20, level=5, cuts="zoom", captions=True,
+              aspect="9:16", no_music=False):
     s0, s1, clean = snap_speech(src, start, end, transcript)   # never start or stop mid-sentence
     if abs(s0 - start) > 0.3 or abs(s1 - end) > 0.3:
         print(f"  clip moved to {s0:.2f}-{s1:.2f}s so it starts and ends on whole sentences")
@@ -122,15 +138,14 @@ def talk_plan(src, start, end, transcript, workdir, music=None, music_start=None
         m = A.fade(m, 0.5, 1.5) * 10 ** (music_db / 20) * 3.0   # the bed runs continuously under every jump cut
         g = A.duck_envelope(voice, depth_db=-10)
         mix += m * g[None, : m.shape[1]]
+    fx_bus = np.zeros_like(mix)
     if lv(level, 4):
-        A.mix_sfx(mix, [(0.38, "whoosh", -4)], A.ref_db(voice))   # intro whoosh under the hook title
-    mix = A.normalize(mix)
-    os.makedirs(workdir, exist_ok=True)
-    apath = os.path.join(workdir, "mix.wav")
-    save_audio(apath, mix, SR)
+        A.mix_sfx(fx_bus, [(0.38, "whoosh", -4)], A.ref_db(voice))   # intro whoosh under the hook title
+    apath, npath = save_mix(workdir, mix + fx_bus, voice + fx_bus if no_music and music else None)
 
-    plan = {"fps": 30, "width": 1080, "height": 1920, "look": look, "duration": total, "shots": shots,
-            "hits": hits, "audio": apath, "motion_blur": False, "edge": "blur",
+    plan = {"fps": 30, "width": 1080, "height": ASPECTS[aspect], "look": look, "duration": total, "shots": shots,
+            "hits": hits, "audio": apath, "audio_nomusic": npath, "song_start": music_start or 0.0,
+            "motion_blur": False, "edge": "blur",
             "captions": {"words": words, "source_time": True} if captions and captions_ok(transcript) else None}
     if title:
         plan["title"] = {"text": title, "t0": 0, "t1": min(total, 4.0), "y": 330}
@@ -139,7 +154,7 @@ def talk_plan(src, start, end, transcript, workdir, music=None, music_start=None
 
 # =================================================================== VELOCITY / FAN EDIT
 def edit_plan(sources, music, workdir, length=15.0, music_start=None, hook=None, look="teal_orange",
-              letterbox=0.0, level=6, music_fx=None, shot_list=None):
+              letterbox=0.0, level=6, music_fx=None, shot_list=None, aspect="9:16", no_music=False):
     """sources: list of video paths. hook: optional {src, start, end, words} dialogue intro.
     shot_list: optional manual [{src, peak}] in priority order (otherwise auto by motion)."""
     ma = analyze(music)
@@ -285,10 +300,10 @@ def edit_plan(sources, music, workdir, length=15.0, music_start=None, hook=None,
     ref = A.ref_db(mix)
     ev = [(drop - 0.01, "drop")] * (level >= 3) + [(h["t"], A.SFX_FOR[h["type"]]) for h in hits
                                     if h["type"] in A.SFX_FOR and h["t"] > drop + 0.1]
+    vb = np.zeros_like(mix)
     if hook:
         v = load_audio(hook["src"], SR)[:, int(hook["start"] * SR):int(hook["end"] * SR)]
         v = A.fade(v, 0.02, 0.06)
-        vb = np.zeros_like(mix)
         A.place(vb, v * 1.6, 0.0)
         g = A.duck_envelope(vb, depth_db=-16)
         # music under hook sits low anyway until the drop
@@ -297,14 +312,13 @@ def edit_plan(sources, music, workdir, length=15.0, music_start=None, hook=None,
         mix = mix * (g * pre)[None, :] + vb
         if level >= 5:
             ev.append((drop, "riser"))
-    A.mix_sfx(mix, ev, ref)
-    mix = A.normalize(mix)
-    os.makedirs(workdir, exist_ok=True)
-    apath = os.path.join(workdir, "mix.wav")
-    save_audio(apath, mix, SR)
+    fx_bus = np.zeros_like(mix)
+    A.mix_sfx(fx_bus, ev, ref)
+    apath, npath = save_mix(workdir, mix + fx_bus, vb + fx_bus if no_music else None)
 
-    plan = {"fps": 30, "width": 1080, "height": 1920, "look": look, "letterbox": letterbox,
+    plan = {"fps": 30, "width": 1080, "height": ASPECTS[aspect], "look": look, "letterbox": letterbox,
             "duration": length, "shots": shots_out, "hits": hits, "audio": apath, "motion_blur": "flow",
+            "audio_nomusic": npath, "song_start": m0,
             "music": {"path": music, "start": m0, "tempo": ma["tempo"], "drop": drop}}
     if hook and hook.get("words"):
         plan["captions"] = {"words": hook["words"], "source_time": True, "y": 0.68}

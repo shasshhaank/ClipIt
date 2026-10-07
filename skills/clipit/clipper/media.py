@@ -216,14 +216,14 @@ class SegmentReader:
 class Encoder:
     """Pipe BGR frames into ffmpeg and mux the audio."""
 
-    def __init__(self, path, width, height, fps, audio=None, crf=17):
+    def __init__(self, path, width, height, fps, audio=None, crf=17, preset="medium"):
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         self.path = path
         cmd = [FFMPEG, "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{width}x{height}",
                "-r", str(fps), "-i", "-"]
         if audio:
             cmd += ["-i", audio]
-        cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", str(crf), "-pix_fmt", "yuv420p",
+        cmd += ["-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-pix_fmt", "yuv420p",
                 "-profile:v", "high", "-movflags", "+faststart"]
         if audio:
             cmd += ["-c:a", "aac", "-b:a", "256k", "-shortest"]

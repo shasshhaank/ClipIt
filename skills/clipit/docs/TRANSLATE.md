@@ -43,6 +43,7 @@ this project isn't affiliated with any of them. Field details are in `EFFECTS.md
 | Exposure flash, strobe | flash / flicker | `flash`, `exposure`, `flicker`; dip to black is `black` |
 | Invert | invert | `invert` hit |
 | Lumetri, Curves, Hue/Saturation, Vibrance | looks | `crisp4k`, `hdr`, `teal_orange`, `dark`, `mono`, `punchy`, `warm_film`, `clean`; add new ones in `fx.Look.PRESETS` |
+| Lumetri Creative Look / Apply LUT (.cube) | `.cube` look | the LUT's path as `look`; `clip.py match-look` fits one to a reference |
 | Sharpen, Unsharp Mask | look `sharp`, `clarity` | |
 | Vignette, Noise/Grain | look `vig`, `grain` | |
 | Light leak overlays | leak | `leak` (fx or hit) |
@@ -119,6 +120,10 @@ this project isn't affiliated with any of them. Field details are in `EFFECTS.md
 | Slide, Swipe | `whip` (`"axis": "y"` for up/down) |
 | Spin, Glitch, Flash, Shake transitions | `spin`, `glitch`, `flash`, `shake` |
 | Effects: Shake, Blur, Strobe, RGB split, VHS/Retro, Light leak, Glow/Neon, Fisheye, Black flash | `shake`, `blur`, `flicker`, `rgb`, `vhs`, `leak`, `bloom`, `bulge`, `black` |
+| Split screen (Layout, Collage) | shot `"layout": "split"` with `top` and `bottom` |
+| Auto captions: karaoke / word highlight templates | `"caption_style": "karaoke"` (or `box` for one word on a block) |
+| Emoji stickers, Tracking on a face | image `emoji` with `follow: true` |
+| Glowing eyes (Body effects) | `eyes` hit |
 | Reverse | `speed: "reverse"` |
 | Reverse trend (clip + reversed copy) | `speed: "boomerang"` |
 | Keyframe scale with graph easing | shot `zoom: [a, b]` or `zooms` |

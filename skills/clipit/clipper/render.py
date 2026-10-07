@@ -560,7 +560,7 @@ class Renderer:
         self.rng = np.random.default_rng(3)
         self.infos = {}
         self.looks = {plan.get("look", "punchy"): self.look}
-        for s in plan["shots"]:
+        for s in plan["shots"] + [q for s in plan["shots"] for q in s.get("split", [])]:
             if s["src"] not in self.infos:
                 self.infos[s["src"]] = probe(s["src"])
             if s.get("look") and s["look"] not in self.looks:
@@ -587,12 +587,12 @@ class Renderer:
         self.ov_readers = {}
 
     # ------------------------------------------------------------ source access
-    def _reader(self, i):
+    def _reader(self, i, s=None, key=None):
         shots = self.p["shots"]
-        s = shots[i]
-        if i not in self.readers:
-            for k in list(self.readers):  # close finished shots
-                if k < i - 1:
+        s, key = s or shots[i], i if key is None else key
+        if key not in self.readers:
+            for k in list(self.readers):  # close finished shots (and their split panels)
+                if (k if isinstance(k, int) else k[0]) < i - 1:
                     self.readers.pop(k).close()
             info = self.infos[s["src"]]
             w, h = info["width"], info["height"]
@@ -600,7 +600,7 @@ class Renderer:
             w, h = int(w * sc) // 2 * 2, int(h * sc) // 2 * 2
             # extra source after the shot so the next shot can dissolve over it
             tail = 0.0
-            if i + 1 < len(shots) and shots[i + 1].get("mix"):
+            if key == i and i + 1 < len(shots) and shots[i + 1].get("mix"):
                 _, _, _, end_speed = self._timing(s, s["out"][1] - 1e-4)
                 tail = shots[i + 1]["mix"] * max(1.0, abs(end_speed)) + 0.1
             interp = s.get("interp", self.p.get("interp", "blend"))
@@ -611,8 +611,8 @@ class Renderer:
             else:
                 rd = SegmentReader(s["src"], s["src_in"] - 0.05, s["src_span"] + 0.2 + tail, w, h,
                                    info["fps"], s.get("interp_fps"), interp=interp)
-            self.readers[i] = rd
-        return self.readers[i]
+            self.readers[key] = rd
+        return self.readers[key]
 
     def _shot_at(self, t):
         shots = self.p["shots"]
@@ -687,7 +687,7 @@ class Renderer:
             cy = zy
         c = dict(zoom=zoom, cx=cx, cy=cy, rot=zr, dx=0.0, dy=0.0, sy=1.0, zoom_blur=0.0, blur_len=0.0, rgb=0.0,
                  glitch=0.0, flash_w=0.0, flash_b=0.0, expo=1.0, inv=False, defocus=0.0, edges=0.0, jaws=0.0,
-                 rays=0.0, desat=0.0, ripple=0.0, sweep=-1.0, rim=0.0)
+                 rays=0.0, desat=0.0, ripple=0.0, sweep=-1.0, rim=0.0, eyes=0.0, eyes_color="red")
         base = dict(self.p.get("fx", {}), **s.get("fx", {}))
         for key in ("bloom", "leak", "vhs", "echo", "rgb_radial", "bulge", "halftone", "dust"):
             c[key] = base.get(key, 0.0)
@@ -806,6 +806,8 @@ class Renderer:
                 c["vhs"] = max(c["vhs"], a * e)
             elif typ == "leak":
                 c["leak"] = max(c["leak"], a * e)
+            elif typ == "eyes":      # glowing eyes (red, blue, purple, white), e.g. from the drop on
+                c["eyes"], c["eyes_color"] = max(c["eyes"], a * e), h.get("color", "red")
             elif typ == "handheld":
                 hx, hy, hr = fx.handheld(t, h.get("px", 14) * a * e, h.get("speed", 1.0))
                 c["dx"] += hx
@@ -828,10 +830,10 @@ class Renderer:
         return img
 
     # ------------------------------------------------------------ one shot's picture
-    def _shot_image(self, i, t, k):
-        s = self.p["shots"][i]
+    def _shot_image(self, i, t, k, s=None, key=None):
+        s = s or self.p["shots"][i]
         u, src_t, _, speed = self._timing(s, t)
-        rd = self._reader(i)
+        rd = self._reader(i, s, key)
         P = float(s.get("stepped_fps") or s.get("posterize") or 0)   # choppy, stepped frame rate
         if P:
             src_t = s["src_in"] + math.floor((src_t - s["src_in"]) * P) / P
@@ -902,6 +904,9 @@ class Renderer:
         if c["rgb_radial"] > 0.001:
             img = fx.rgb_radial(img, c["rgb_radial"])
         img = self.looks[s.get("look", self.p.get("look", "punchy"))](img)
+        if c["eyes"] > 0.01 and (s.get("track") or {}).get("eyes"):   # glowing eyes ride on the tracked eye points
+            e = [float(np.interp(src_t, s["track"]["t"], v)) for v in s["track"]["eyes"]]
+            img = fx.eye_glow(img, [self._to_out(s, c, e[0], e[1]), self._to_out(s, c, e[2], e[3])], c["eyes"], c["eyes_color"])
         if c["edges"] > 0.01:
             img = fx.edge_glow(img, c["edges"], c["edges_color"], c["edges_grow"])
         if c["desat"] > 0.01:
@@ -941,7 +946,7 @@ class Renderer:
         t = k / self.fps
         i = self._shot_at(t)
         s = self.p["shots"][i]
-        img, c, src_t = self._shot_image(i, t, k)
+        img, c, src_t = self._split_image(i, s, t, k) if s.get("split") else self._shot_image(i, t, k)
         mix = s.get("mix", 0)
         if mix and i > 0 and t < s["out"][0] + mix:
             # cross-dissolve ("Mix" transition) from the previous shot, which keeps playing
@@ -970,6 +975,10 @@ class Renderer:
             ft = tl.s.get("follow_track")
             if ft and ft["src"] == s["src"] and tl.s["t0"] <= t < tl.s["t1"]:   # text rides along with the subject
                 x, y = self._to_out(s, c, float(np.interp(src_t, ft["t"], ft["x"])), float(np.interp(src_t, ft["t"], ft["y"])))
+                if ft.get("below") and ft.get("eyes"):   # offset in eye-spacings, so it scales with the face
+                    e = [float(np.interp(src_t, ft["t"], v)) for v in ft["eyes"]]
+                    (ax, ay), (bx, by) = self._to_out(s, c, e[0], e[1]), self._to_out(s, c, e[2], e[3])
+                    y += ft["below"] * np.hypot(bx - ax, by - ay)
                 tl.s["x"], tl.s["y"] = x + ft.get("dx", 0), y + ft.get("dy", -260)
             img = tl.draw(img, t, k, ae)
             if tl.s.get("behind") and tl.s["t0"] <= t < tl.s["t1"]:   # put the subject back in front of the text
@@ -981,6 +990,18 @@ class Renderer:
             if tt.get("t0", 0) <= t < tt.get("t1", 3):
                 img = _paste(img, self.title, self.W // 2, tt.get("y", 300))
         return img
+
+    def _split_image(self, i, s, t, k):
+        """Two feeds stacked top/bottom: each panel renders as its own shot, and the band around its faces is kept."""
+        bands, first = [], None
+        for j, q in enumerate(s["split"]):
+            img, c, src_t = self._shot_image(i, t, k, q, (i, j))
+            y0 = int(min(max(self.H * 0.42 - self.H / 4, 0), self.H / 2))
+            bands.append(img[y0:y0 + self.H // 2])
+            first = first or (img, c, src_t)
+        img = np.vstack(bands)[:self.H]
+        img[self.H // 2 - 3:self.H // 2 + 3] = 0   # a thin divider
+        return img, first[1], first[2]
 
     def _to_out(self, s, c, nx, ny):
         """Output pixel position of a normalised source point under the shot's current camera
@@ -1018,7 +1039,8 @@ class Renderer:
 
     def run(self, out_path):
         n = int(round(self.p["duration"] * self.fps))
-        enc = Encoder(out_path, self.W, self.H, self.fps, audio=self.p.get("audio"), crf=self.p.get("crf", 17))
+        enc = Encoder(out_path, self.W, self.H, self.fps, audio=self.p.get("audio"), crf=self.p.get("crf", 17),
+                      preset="ultrafast" if self.p.get("draft") else "medium")
         try:
             for k in range(n):
                 enc.write(self.frame(k))

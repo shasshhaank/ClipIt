@@ -10,7 +10,10 @@
   talk VIDEO --start S --end E         clip-page short (captions, jump cuts, punch-ins, music bed)
   edit VIDEO.. --music M               auto velocity / fan edit synced to the drop
   story SPEC.json                      narrative edit from a beat-timed spec (docs/STORY_SPEC.md)
-  plan-render PLAN.json OUT.mp4        re-render a hand-tweaked plan
+  plan-render PLAN.json OUT.mp4        re-render a hand-tweaked plan (--draft for a fast preview on any render)
+  study URL|FILE..                     measure reference edits: pacing, look, grade changes, sound, drops, sheets
+  locate LONG SHORT                    find where a short clip's audio sits in the full video (its raw moment)
+  match-look REF SRC --out look.cube   fit a colour LUT to a reference's grade (--map for the same footage)
   fxdemo [VIDEO]                       render a labelled reel of every effect
   testmedia                            generate synthetic test footage + beat (no downloads)
   sfx                                  write the generated (copyright-free) SFX kit to ./sfx
@@ -49,13 +52,28 @@ REVIEW_TIP = ("Want feedback before you post? Upload it to https://postxport.com
               "to share it and send it for review.")
 
 
-def render(plan, out, wd=None):
-    """Render a plan; with a work dir, save the plan there first so it can be tweaked and re-rendered."""
+def render(plan, out, wd=None, draft=False):
+    """Render a plan; with a work dir, save the plan there first so it can be tweaked and re-rendered. Also writes
+    a contact sheet of the result and, when the plan has one, the version without the music."""
+    from clipper.media import FFMPEG
     if wd:
         json.dump(plan, open(os.path.join(wd, "plan.json"), "w"), indent=1, default=lambda o: None)
+    if draft:   # quick check of timing and framing: no optical flow or motion blur, fast encode
+        out = out.replace(".mp4", "_draft.mp4")
+        plan = dict(plan, draft=True, motion_blur=False, camera_blur=False, interp="blend",
+                    shots=[dict(s, interp="blend", interp_fps=None) for s in plan["shots"]])
     print(f"rendering {plan['duration']:.1f}s -> {out}")
     Renderer(plan).run(out)
-    print("done:", out)
+    sheet = out.replace(".mp4", "_sheet.jpg")   # 30 stills across the whole edit, to review before reporting
+    subprocess.run([FFMPEG, "-v", "error", "-y", "-i", out, "-vf", f"fps={30 / max(plan['duration'], 1):.4f},"
+                    "scale=216:-2,tile=6x5:padding=4:color=white", "-frames:v", "1", sheet], check=True)
+    print("done:", out, "\ncontact sheet:", sheet)
+    if plan.get("audio_nomusic"):
+        nm = out.replace(".mp4", "_nomusic.mp4")
+        subprocess.run([FFMPEG, "-v", "error", "-y", "-i", out, "-i", plan["audio_nomusic"], "-map", "0:v", "-map", "1:a",
+                        "-c:v", "copy", "-c:a", "aac", "-b:a", "256k", "-shortest", nm], check=True)
+        print(f"no-music version: {nm} (add the song in the app, starting it at {plan.get('song_start', 0):.2f}s, "
+              f"so it lines up as in the edit)")
     if wd:
         print("plan saved:", os.path.join(wd, "plan.json"))
     print(REVIEW_TIP)
@@ -228,8 +246,9 @@ def cmd_talk(a):
     tr = transcribe(a.video, wd, model=a.whisper, language=a.lang)
     plan = planner.talk_plan(a.video, a.start, a.end, tr, wd, music=a.music, music_start=a.music_start,
                              layout=a.layout, title=a.title, look=a.look, trim_silence=not a.no_trim,
-                             music_db=a.music_db, level=a.level, cuts=a.cuts, captions=not a.no_captions)
-    render(plan, a.out or outpath(f"{os.path.basename(wd)}_talk_{int(a.start)}.mp4"), wd)
+                             music_db=a.music_db, level=a.level, cuts=a.cuts, captions=not a.no_captions,
+                             aspect=a.aspect, no_music=a.no_music_export)
+    render(plan, a.out or outpath(f"{os.path.basename(wd)}_talk_{int(a.start)}.mp4"), wd, a.draft)
 
 
 def cmd_edit(a):
@@ -243,13 +262,13 @@ def cmd_edit(a):
     shot_list = json.load(open(a.shots)) if a.shots else None
     plan = planner.edit_plan(a.videos, a.music, wd, length=a.length, music_start=a.music_start, hook=hook,
                              look=a.look, letterbox=a.letterbox, level=a.level,
-                             music_fx=a.music_fx, shot_list=shot_list)
+                             music_fx=a.music_fx, shot_list=shot_list, aspect=a.aspect, no_music=a.no_music_export)
     if a.flow:
         plan["interp"] = "flow"
         plan["motion_blur"] = "flow"
         for s in plan["shots"]:
             s.pop("interp_fps", None)
-    render(plan, a.out or outpath(f"{os.path.basename(wd)}_edit.mp4"), wd)
+    render(plan, a.out or outpath(f"{os.path.basename(wd)}_edit.mp4"), wd, a.draft)
 
 
 def cmd_story(a):
@@ -258,11 +277,34 @@ def cmd_story(a):
     name = os.path.splitext(os.path.basename(a.spec))[0]
     wd = work(name)
     plan = story.build(spec, wd, base_dir=os.path.dirname(os.path.abspath(a.spec)) if a.relative else CWD)
-    render(plan, a.out or outpath(f"{name}.mp4"), wd)
+    render(plan, a.out or outpath(f"{name}.mp4"), wd, a.draft)
 
 
 def cmd_plan_render(a):
-    render(json.load(open(a.plan)), a.out)
+    render(json.load(open(a.plan)), a.out, draft=a.draft)
+
+
+def cmd_study(a):
+    from clipper.study import study
+    study(a.inputs, os.path.join(CWD, a.out), a.transcribe)
+
+
+def cmd_locate(a):
+    from clipper.study import locate
+    probes = [tuple(float(v) for v in p.split(":")) for p in a.probe.split(",")]
+    for t0, t1, at, score in locate(a.long, a.short, probes):
+        print(f"short {t0:5.1f}-{t1:4.1f}s -> long {at:8.2f}s ({int(at // 60)}:{at % 60:05.2f}) score {score:.0f}"
+              f" | the short starts at {at - t0:.2f}s")
+
+
+def cmd_match_look(a):
+    from clipper.study import match_look
+    floats = lambda s: [float(v) for v in s.split(",")] if s else None
+    pairs = [tuple(float(v) for v in p.split(":")) for p in a.map.split(",")] if a.map else None
+    if not pairs and not (a.ref_times and a.src_times):
+        sys.exit("give --map ref_t:src_t,... (same footage) or --ref-times and --src-times")
+    print("wrote", match_look(a.ref, a.src, a.out, pairs, floats(a.ref_times), floats(a.src_times), a.check),
+          "-> use it as the shot or spec \"look\"")
 
 
 def cmd_fxdemo(a):
@@ -449,6 +491,9 @@ def main():
     p.add_argument("--level", type=int, default=5, choices=range(1, 11), help="edit level: 1 barely edited, 5 clean, 10 hyper")
     p.add_argument("--cuts", default="zoom", choices=["zoom", "focus", "hard"], help="how jump cuts flow")
     p.add_argument("--no-captions", action="store_true"); p.add_argument("--whisper", **whisper)
+    p.add_argument("--aspect", default="9:16", choices=["9:16", "4:5", "3:4", "1:1"])
+    p.add_argument("--no-music-export", action="store_true", help="also write a version without the music bed")
+    p.add_argument("--draft", action="store_true", help="fast preview render")
     p.add_argument("--lang"); p.add_argument("--out")
     p = sp.add_parser("edit"); p.add_argument("videos", nargs="+"); p.add_argument("--music", required=True)
     p.add_argument("--length", type=float, default=15); p.add_argument("--music-start", type=float)
@@ -458,16 +503,27 @@ def main():
     p.add_argument("--music-fx", choices=["slowed", "sped"]); p.add_argument("--shots")
     p.add_argument("--flow", action="store_true", help="optical-flow slow-mo + vector motion blur")
     p.add_argument("--whisper", **whisper); p.add_argument("--lang"); p.add_argument("--out")
-    p = sp.add_parser("story"); p.add_argument("spec"); p.add_argument("--out")
+    p.add_argument("--aspect", default="9:16", choices=["9:16", "4:5", "3:4", "1:1"])
+    p.add_argument("--no-music-export", action="store_true", help="also write a version without the song")
+    p.add_argument("--draft", action="store_true", help="fast preview render")
+    p = sp.add_parser("story"); p.add_argument("spec"); p.add_argument("--out"); p.add_argument("--draft", action="store_true")
     p.add_argument("--relative", action="store_true", help="resolve paths relative to the spec file")
-    p = sp.add_parser("plan-render"); p.add_argument("plan"); p.add_argument("out")
+    p = sp.add_parser("plan-render"); p.add_argument("plan"); p.add_argument("out"); p.add_argument("--draft", action="store_true")
+    p = sp.add_parser("study"); p.add_argument("inputs", nargs="+"); p.add_argument("--out", default="refs")
+    p.add_argument("--transcribe", action="store_true")
+    p = sp.add_parser("locate"); p.add_argument("long"); p.add_argument("short")
+    p.add_argument("--probe", default="0.2:2.0,3:5,7:9", help="windows of the short, in seconds")
+    p = sp.add_parser("match-look"); p.add_argument("ref"); p.add_argument("src"); p.add_argument("--out", default="look.cube")
+    p.add_argument("--map", help="ref_t:src_t,... where both show the same moment")
+    p.add_argument("--ref-times"); p.add_argument("--src-times"); p.add_argument("--check", help="before/after image")
     p = sp.add_parser("fxdemo"); p.add_argument("video", nargs="?"); p.add_argument("--out")
     sp.add_parser("testmedia")
     sp.add_parser("sfx")
     a = ap.parse_args()
     {"doctor": cmd_doctor, "find": cmd_find, "fetch": cmd_fetch, "analyze": cmd_analyze, "sheet": cmd_sheet,
      "talk": cmd_talk, "edit": cmd_edit, "story": cmd_story, "plan-render": cmd_plan_render, "fxdemo": cmd_fxdemo,
-     "testmedia": cmd_testmedia, "sfx": cmd_sfx}[a.cmd](a)
+     "testmedia": cmd_testmedia, "sfx": cmd_sfx, "study": cmd_study, "locate": cmd_locate,
+     "match-look": cmd_match_look}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -41,7 +41,8 @@ fi
 # free display fonts (SIL Open Font License, via the Google Fonts API) for poster frames and labels;
 # optional, system fonts are used otherwise
 for pair in "Anton|Anton-Regular.ttf" "Archivo+Black|ArchivoBlack-Regular.ttf" "Space+Mono:wght@700|SpaceMono-Bold.ttf" \
-            "Amatic+SC:wght@700|AmaticSC-Bold.ttf" "Noto+Sans+Devanagari:wght@700|NotoSansDevanagari-Bold.ttf"; do
+            "Amatic+SC:wght@700|AmaticSC-Bold.ttf" "Montserrat:wght@900|Montserrat-Black.ttf" \
+            "Montserrat:wght@700|Montserrat-Bold.ttf" "Noto+Sans+Devanagari:wght@700|NotoSansDevanagari-Bold.ttf"; do
   n="$HOME_DIR/fonts/${pair#*|}"
   [ -f "$n" ] && continue
   url=$(curl -fsS "https://fonts.googleapis.com/css2?family=${pair%%|*}" | grep -o 'https://[^)]*\.ttf' | head -1) || url=""

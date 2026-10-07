@@ -2,7 +2,10 @@
   "clip"  clip-page captions: ALL CAPS, heavy font, white + thick black stroke, active/keyword word in yellow,
           1-3 words per card, pop-in scale 80->110->100% over ~5 frames, at ~65% screen height.
   "edit"  subtitles for edits: one small line (up to ~6 words), each word fading up as it is spoken,
-          key words in red, a soft shadow, fading out at the end of the line."""
+          key words in red, a soft shadow, fading out at the end of the line.
+  "karaoke" the whole 2-4 word phrase on screen, words still to come faint, each word turning solid (key words
+          green) with a small pop as it is said: viewers read ahead and still feel the timing.
+  "box"   one word at a time in tall condensed caps, yellow on a solid black box (fast two-person clips)."""
 import os
 import re
 import unicodedata
@@ -90,9 +93,10 @@ class CaptionRenderer:
             self.groups = group_words(words, max_words=6, max_chars=32, max_gap=0.6)
             size = min(size, 46)
         else:
-            self.groups = group_words(words)
+            self.groups = group_words(words, **{"karaoke": dict(max_words=4, max_chars=24),
+                                                "box": dict(max_words=1)}.get(style, {}))
         self.W, self.H = width, height
-        self.face = self.face or ("bold" if style == "edit" else "heavy")
+        self.face = self.face or {"edit": "bold", "box": "condensed"}.get(style, "heavy")
         # joined scripts (Hindi...) are shaped with HarfBuzz when installed (install.sh --with-hindi)
         self.shape = shaping.available() and any(shaping.needs(w["w"]) for w in words)
         self.font = ImageFont.truetype(font_path(self.face), size)
@@ -141,13 +145,24 @@ class CaptionRenderer:
         h = int(font.size * 1.35) + pad * 2
         img = Image.new("RGBA", (int(total) + pad * 2, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
+        box = self.style == "box"
         x = pad
         for i, it in enumerate(g):
-            col = YELLOW if i == active else GREEN if it["key"] else WHITE
-            # drop shadow then stroked text
-            self._text(img, d, (x + 5, pad + 7), it["t"], font, (0, 0, 0, 150), self.stroke, (0, 0, 0, 150))
-            self._text(img, d, (x, pad), it["t"], font, col, self.stroke, (0, 0, 0))
+            if self.style == "karaoke":   # said so far: solid (key words green); still to come: faint
+                col = (GREEN if it["key"] else WHITE) + ((255,) if i <= active else (82,))
+            else:
+                col = YELLOW if box or i == active else GREEN if it["key"] else WHITE
+            if not box:   # drop shadow then stroked text
+                self._text(img, d, (x + 5, pad + 7), it["t"], font, (0, 0, 0, 150), self.stroke, (0, 0, 0, 150))
+            self._text(img, d, (x, pad), it["t"], font, col, 0 if box else self.stroke, (0, 0, 0))
             x += widths[i] + space * scale
+        if box and img.getbbox():   # solid black box behind the word, with a soft offset shadow
+            b = img.getbbox()
+            px, py = int(font.size * 0.14), int(font.size * 0.08)
+            under = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            ImageDraw.Draw(under).rectangle((b[0] - px + 5, b[1] - py + 6, b[2] + px + 5, b[3] + py + 6), fill=(0, 0, 0, 110))
+            ImageDraw.Draw(under).rectangle((b[0] - px, b[1] - py, b[2] + px, b[3] + py), fill=(0, 0, 0, 240))
+            img = Image.alpha_composite(under, img)
         arr = np.array(img)
         self.cache[key] = arr
         return arr
@@ -193,9 +208,11 @@ class CaptionRenderer:
                     if it["s"] <= t:
                         active = k
                 img = self._render(gi, active)
-                age = t - s
+                age = t - (g[active]["s"] if self.style == "karaoke" else s)   # karaoke pops on every new word
                 # pop: 0.8 -> 1.1 (2f) -> 1.0 (4f)
-                if age < 0.066:
+                if self.style == "karaoke":
+                    sc = 1.0 + 0.06 * np.exp(-max(0.0, age) * 18)
+                elif age < 0.066:
                     sc = 0.8 + 0.3 * age / 0.066
                 elif age < 0.2:
                     sc = 1.1 - 0.1 * (age - 0.066) / 0.134

@@ -21,7 +21,7 @@ _det = {}
 
 
 def detect(img):
-    """Faces in a BGR frame: [(cx, cy, w, h, eye_y, mouth_y)], normalised to the frame (0..1)."""
+    """Faces in a BGR frame: [(cx, cy, w, h, eye_y, mouth_y, (lx, ly, rx, ry))], normalised to the frame (0..1)."""
     h, w = img.shape[:2]
     if "yunet" not in _det:
         try:
@@ -38,11 +38,14 @@ def detect(img):
             x, y, fw, fh = f[:4]
             eye_y = (f[5] + f[7]) / 2
             mouth_y = (f[11] + f[13]) / 2
-            out.append(((x + fw / 2) / w, (y + fh / 2) / h, fw / w, fh / h, eye_y / h, mouth_y / h))
+            out.append(((x + fw / 2) / w, (y + fh / 2) / h, fw / w, fh / h, eye_y / h, mouth_y / h,
+                        (f[4] / w, f[5] / h, f[6] / w, f[7] / h)))
         return out
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     for x, y, fw, fh in _det["haar"].detectMultiScale(gray, 1.15, 5, minSize=(w // 24, w // 24)):
-        out.append(((x + fw / 2) / w, (y + fh / 2) / h, fw / w, fh / h, (y + 0.4 * fh) / h, (y + 0.78 * fh) / h))
+        ey = (y + 0.4 * fh) / h
+        out.append(((x + fw / 2) / w, (y + fh / 2) / h, fw / w, fh / h, ey, (y + 0.78 * fh) / h,
+                    ((x + 0.3 * fw) / w, ey, (x + 0.7 * fw) / w, ey)))
     return out
 
 
@@ -82,14 +85,17 @@ def track(src, start, end, sample_fps=5):
         i += 1
     cap.release()
     if not samples:
-        return {"t": [start, end], "x": [0.5, 0.5], "y": [0.45, 0.45], "ex": [0.5, 0.5], "ey": [0.4, 0.4], "zmax": None}
+        return {"t": [start, end], "x": [0.5, 0.5], "y": [0.45, 0.45], "ex": [0.5, 0.5], "ey": [0.4, 0.4], "zmax": None,
+                "eyes": None}
     subject, switches = _speaker(samples)
     ts = np.array([s[0] for s in samples])
     xs, ys, ex, ey, caps, room = (np.full(len(samples), np.nan) for _ in range(6))
+    eyes = np.full((len(samples), 4), np.nan)
     for k, (t, faces, motion, _) in enumerate(samples):
         f = faces[subject[k]] if subject[k] is not None else None
         if f is not None:
             ex[k], ey[k] = f[0], f[4]
+            eyes[k] = f[6]
             xs[k], ys[k] = f[0], f[4] + (0.5 - EYE_LINE) / Z_REF
             caps[k] = zoom_cap(f[2], f[3], src_ar)
             # how far the camera may lag behind the face before the head starts leaving the frame
@@ -107,6 +113,7 @@ def track(src, start, end, sample_fps=5):
     return {"t": ts.tolist(), "x": _smooth(ts, xs, cuts, 0.5, room).tolist(),
             "y": np.clip(_smooth(ts, ys, cuts, 0.42), 0, 1).tolist(),
             "ex": _fill(ex, 0.5).tolist(), "ey": _fill(ey, 0.4).tolist(), "z": z.tolist(),
+            "eyes": [_fill(eyes[:, j], np.nan).tolist() for j in range(4)] if not np.isnan(eyes).all() else None,
             "zmax": float(z.min()) if z.min() < 3.0 else None}
 
 
@@ -114,7 +121,7 @@ def _mouths(gray, faces):
     """A small patch around each mouth, to tell who is talking."""
     h, w = gray.shape
     out = []
-    for cx, _, fw, fh, _, my in faces:
+    for cx, _, fw, fh, _, my, _ in faces:
         x0, x1 = int((cx - fw * 0.3) * w), int((cx + fw * 0.3) * w)
         y0, y1 = int((my - fh * 0.15) * h), int((my + fh * 0.15) * h)
         p = gray[max(0, y0):max(1, y1), max(0, x0):max(1, x1)]

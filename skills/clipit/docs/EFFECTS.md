@@ -89,6 +89,15 @@ Shot options:
 ## Looks (grades)
 `clean`, `punchy`, `teal_orange`, `dark`, `mono`, `warm_film`, `bright` (wholesome: airy, colourful, glowing highlights), plus `crisp4k`, `hdr` and `poster` below. Each is a contrast S-curve with shadow and highlight tint, saturation, sharpening, grain and vignette. A shot's `look` overrides the plan default, so a story can go from mono in the setup to colour on the drop.
 
+Any `.cube` 3D LUT path also works as a `look` (trilinear, then the clean base). `clip.py match-look REF SRC --out look.cube` fits one to a reference: give `--map ref_t:src_t,...` when both show the same footage (tone curves plus a colour matrix, outliers rejected), or it matches the overall colour statistics.
+
+## Glowing eyes and emoji
+- `eyes` hit: a hot core and a horizontal flare on each tracked eye, bloomed and screened on. `color`: `red` (menace, the classic mono-grade stare), `blue`, `purple` or `white`; `amt` sets strength.
+- `emoji` images: a colour emoji drawn from the system emoji font (Apple Color Emoji or Noto Color Emoji). Pick one that says the drop: 🥶 cold or impressed, 💀 dead or funny, 🤯 mind-blown, 😳 shocked, 🗿 deadpan. One per edit.
+
+## Split screen
+`"layout": "split"` stacks two feeds (top and bottom halves, a thin divider), each framed on its faces and playing in real time with its own sound (`audio`: `top`, `bottom` or `mix`). For two-person calls, co-streams and reactions.
+
 ## Text layers
 Fields:
 - `anim`: `pop`, `slam`, `type` (letters), `words` (word by word, in place, over `type_dur`), `assemble` (letters fly in from scattered spots, spinning and growing) or `fade`.

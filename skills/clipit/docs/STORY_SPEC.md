@@ -31,6 +31,10 @@ Relative paths resolve from the folder you run the command in. Pass `--relative`
   "transitions": ["whip", "zoom_in"],   // only at levels 9-10, every two bars after the drop
   "edge": "mirror",           // fill around a picture shown smaller than the frame: "mirror" (motion tile) | "blur"
   "caption_style": "edit",    // dialogue captions: "edit" (small, word by word) | "clip" (big clip-page captions)
+                              //   | "karaoke" (whole phrase faint, words light up as said) | "box" (one word, yellow on black)
+  "aspect": "9:16",           // or "4:5" | "3:4" | "1:1"; text and image y positions are written for 1920 and scaled
+  "export_no_music": false,   // true: also write <out>_nomusic.mp4 and print where to start the song in the app
+  "bleeps": [{"t": 1.2, "dur": 0.35}],   // censor: the voice drops out under a tone ("t" seconds, or "at" a beat)
   "whisper": "turbo",         // speech model: "turbo" (fast) | "large" (OpenAI Whisper large-v3; needed for Hindi subtitles)
   "sfx": true,                // generated sound kit, auto-placed and levelled (docs/EFFECTS.md, "Sound effects")
 
@@ -103,6 +107,18 @@ Put it on a calm shot, such as `"speed": "hold"` with `"look": "poster"`.
 Voice shots and `dialogue` lines always run at normal speed (a speed you set on a voice shot is ignored, with a note), and never get jolts. Their speech is never cut mid-sentence: dialogue lines are widened to whole sentences, and a voice shot's audio runs on under the next shot until its sentence ends. Subtitles appear only when the language is certain (see `docs/PLAYBOOK.md`). For several lines in a row, prefer the `dialogue` list: it isn't squeezed onto the beat grid, so lines are never cut mid-word. Top-level `"voice_duck"` (−14 dB) sets how far the music dips under speech and `"caption_y"` (0.7) sets where captions sit. The first captioned run downloads the Whisper model once.
 
 Hits can also carry `"sfx"` (a sound name or `null`). A `{"type": "gap", "at": 8, "db": -15}` hit dips the music right before beat 8, but use it only when asked: viewers hear it as the music cutting.
+
+## Clip-format fields
+```jsonc
+{"layout": "split", "from": 0, "to": 4, "audio": "mix",              // two feeds stacked, both in real time
+ "top": {"src": "input/a.mp4", "start": 812.4},                     // "start" (source second) or "peak", plus cx/cy/look
+ "bottom": {"src": "input/b.mp4", "peak": 3301.0}},                 // "audio": "top" | "bottom" | "mix"
+{"at": 4, "type": "eyes", "color": "red", "dur": 2.0, "att": 0.15, "shape": "hold", "sfx": null},   // a hit: glowing eyes
+{"emoji": "🥶", "from": 4.5, "to": 8, "follow": true}               // an image: colour emoji, riding on the chest
+```
+- `eyes` colours: `red`, `blue`, `purple`, `white`. It needs a visible face; with none tracked it is skipped.
+- `emoji` images default to `w` 300 and a `pop`. `follow: true` puts them 3.5 eye-spacings below the eyes, so they scale with the face; `{"below": 2}` moves them up, `{"dx": 200}` to the side.
+- Any `look` can be a `.cube` file path (from `clip.py match-look` or any 3D LUT), resolved like other paths.
 
 ## Speed profiles
 | name | curve | use |

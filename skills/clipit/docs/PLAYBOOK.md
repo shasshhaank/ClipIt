@@ -171,9 +171,34 @@ Patterns that came up again and again in working After Effects projects for velo
 - Emotional or legacy: slowed+reverb pop, cinematic piano.
 - Podcast bed: lofi or piano, ducked 18–25 dB under the voice.
 - Pick sounds that are climbing fast with under about 50k uses, and post with the in-app sound.
+- Aura and drop clips need a song with a clear drop after a calmer intro or break.
+- To post with a platform sound, render with `"export_no_music": true`: `<out>_nomusic.mp4` keeps the speech and sound effects, and ClipIt prints the second to start the song at in the app so its drop lands where it did in the edit.
 
 ## Captions (clip pages)
 All caps, heavy font, 1–3 words per card, never two lines. White with a 9px black stroke; the spoken word in yellow and charged words or numbers in green. Pop in at 80→110→100% over 6f, sitting at 66% of the frame height. Keep the top 130px and bottom 350px clear of UI.
+- `karaoke`: the whole 2–4-word phrase is up, words still to come faint; each word turns solid with a tiny pop as it's said, key words in green. Viewers read ahead but still feel the timing. Best for story recaps.
+- `box`: one word at a time, tall condensed yellow caps on a solid black box. Best for fast two-person clips.
+- Use at most three caption and text animations in one edit; consistency reads as a brand.
+
+## Clip formats (stream, podcast and reaction clips)
+Three shapes that keep working for clips of real moments. Each is a story spec; check every line is really said.
+
+**Aura / drop clip (12–18 s), when the payoff is a silent reaction: a stare, a smirk, a freeze.**
+1. Hook in frame 1: open on the boldest question or claim, mid-sentence if needed. No intro card.
+2. Setup: each line its own `dialogue` entry on the speaker, 0.5–2.5 s, dead air and side lines cut.
+3. Escalation: someone repeats or questions the claim; a punch-in on the key word.
+4. The silent reaction: a red `label` card like `*IMPRESSED*` narrates it for muted viewers. Time it so the song's own break or quiet run-up sits under it; that hush is what makes the drop hit (don't cut the music to make one).
+5. The drop, in the last 2–3 s at about 75–85% of the runtime: a grade change (`mono` + an `eyes` hit for menace, a cold blue LUT for "impressed"), one `emoji` following the face, a slow push. End there, so it loops.
+
+**Karaoke recap (20–40 s), when the payoff is an action: a dare, a challenge, a reveal.** `caption_style: "karaoke"`. Hook with the premise and the question, an optional 1–2 s cutaway that explains it (with a label), back-and-forth lines, a false resolution, then the payoff with the drop, a shake and one emoji. Recaps can be more colourful than aura clips; the music bed is lighter, the dialogue carries it.
+
+**Split screen (30–60 s), two people reacting to each other live.** `caption_style: "box"`, no music (the raw audio carries it), about one cut every 2 s. Open full-screen on the instigator for under a second, then alternate `split` shots with tight full-screen punch-ins on the loudest beats. Cut to whatever they react to (a chat, a screen) with a label. Censor with `bleeps` and asterisks in the text ("F*CK"). Keep the grade raw.
+
+## Studying a reference
+1. `clip.py study URL|FILE ...` on 3–7 references of the same kind: it measures pacing, look, grade changes, black-and-white stretches, loudness, tempo and drops, and writes 1-per-second sheets and a caption strip.
+2. Fill in the rest by eye from the sheets: hook, caption font and colours and animation, framing, effects, and what changes at the payoff.
+3. Write the recipe in 3–5 steps and map each step to ClipIt fields. Keep what all the references share; one channel's quirk isn't a rule.
+4. To match a grade, `match-look` it into a `.cube`. To edit from the clean source of a short, `locate` it in the full video first.
 
 ## Motion-design recipes
 - **Velocity zooms ("zoom zoom"):**

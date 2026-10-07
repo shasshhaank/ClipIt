@@ -64,6 +64,24 @@ def fit_with_blur_bg(frame, out_w=OUT_W, out_h=OUT_H):
 
 
 # ---------------------------------------------------------------- hit effects
+def eye_glow(frame, pts, amt, color="red"):
+    """Glowing eyes: a hot core and a horizontal flare on each eye point (output px), bloomed and screened on."""
+    if amt <= 0.01 or not pts:
+        return frame
+    h, w = frame.shape[:2]
+    layer = np.zeros((h, w), np.float32)
+    r = max(3.0, (math.dist(pts[0], pts[1]) if len(pts) == 2 else 60) * 0.16)
+    for x, y in pts:
+        cv2.circle(layer, (int(x), int(y)), int(r), 1.0, -1, cv2.LINE_AA)
+        cv2.ellipse(layer, (int(x), int(y)), (int(r * 5), max(1, int(r * 0.35))), 0, 0, 360, 0.7, -1, cv2.LINE_AA)
+    glow = cv2.GaussianBlur(layer, (0, 0), r * 0.8) * 1.4 + cv2.GaussianBlur(layer, (0, 0), r * 3) * 1.6 \
+        + cv2.GaussianBlur(layer, (0, 0), r * 9) * 0.9
+    tint = np.array({"red": (0.1, 0.05, 1.0), "blue": (1.0, 0.45, 0.1), "purple": (1.0, 0.2, 0.8),
+                     "white": (1.0, 1.0, 1.0)}.get(color, (0.1, 0.05, 1.0)), np.float32)   # BGR
+    core = cv2.GaussianBlur(layer, (0, 0), r * 0.35)[..., None] * 0.6
+    return _screen(frame, glow[..., None] * tint * amt + core * amt)
+
+
 def lens_blur(frame, radius):
     """Out-of-focus lens: a disc-shaped blur (round bokeh, like a real defocus), radius in output px."""
     if radius < 0.6:
@@ -159,8 +177,39 @@ def letterbox(frame, frac):
 
 
 # ---------------------------------------------------------------- look / grade
+def load_cube(path):
+    """A 3D .cube LUT as an array indexed [b][g][r] -> rgb (0..1)."""
+    n, rows = None, []
+    for line in open(path):
+        s = line.strip()
+        if s.upper().startswith("LUT_3D_SIZE"):
+            n = int(s.split()[1])
+        elif s and (s[0].isdigit() or s[0] in "-."):
+            rows.append([float(v) for v in s.split()[:3]])
+    if n is None or len(rows) != n ** 3:
+        raise ValueError(f"{path}: not a 3D .cube LUT")
+    return np.asarray(rows, np.float32).reshape(n, n, n, 3)
+
+
+def apply_lut(frame, lut):
+    """Grade a BGR uint8 frame through a 3D LUT (trilinear)."""
+    n = lut.shape[0]
+    p = frame.astype(np.float32) * ((n - 1) / 255)
+    i0 = np.minimum(p.astype(np.int32), n - 2)
+    f = p - i0
+    out = 0
+    for db in (0, 1):
+        for dg in (0, 1):
+            for dr in (0, 1):
+                w = ((f[..., 0:1] if db else 1 - f[..., 0:1]) * (f[..., 1:2] if dg else 1 - f[..., 1:2])
+                     * (f[..., 2:3] if dr else 1 - f[..., 2:3]))
+                out = out + lut[i0[..., 0] + db, i0[..., 1] + dg, i0[..., 2] + dr] * w
+    return (np.clip(out[..., ::-1], 0, 1) * 255).astype(np.uint8)
+
+
 class Look:
-    """Precomputed colour grade + grain + vignette. Presets tuned for edit pages."""
+    """Precomputed colour grade + grain + vignette. Presets tuned for edit pages; a path to a .cube file uses that
+    LUT (e.g. one fitted to a reference with `clip.py match-look`) with a light sharpen and vignette."""
     PRESETS = {
         # contrast, saturation, (b,g,r) shadow tint, (b,g,r) highlight tint, grain, vignette, sharpen
         "clean":   dict(contrast=1.05, sat=1.05, shadow=(0, 0, 0), high=(0, 0, 0), grain=0.0, vig=0.15, sharp=0.3),
@@ -188,7 +237,8 @@ class Look:
     }
 
     def __init__(self, name="punchy", w=OUT_W, h=OUT_H, seed=7):
-        p = self.PRESETS[name]
+        self.cube = load_cube(name) if str(name).lower().endswith(".cube") else None
+        p = dict(self.PRESETS["clean"], contrast=1.0, sat=1.0) if self.cube is not None else self.PRESETS[name]
         self.p = p
         x = np.arange(256, dtype=np.float32) / 255.0
         x = np.clip(x + p.get("bright", 0) / 255.0, 0, 1) ** p.get("gamma", 1.0)
@@ -211,7 +261,7 @@ class Look:
 
     def __call__(self, frame):
         p = self.p
-        out = cv2.LUT(frame, self.lut)
+        out = cv2.LUT(apply_lut(frame, self.cube) if self.cube is not None else frame, self.lut)
         if p.get("clarity"):       # local contrast: add back detail relative to a big blur
             h, w = out.shape[:2]
             r = p.get("clarity_r", 16)
