@@ -36,6 +36,8 @@ Relative paths resolve from the folder you run the command in. Pass `--relative`
   "export_no_music": false,   // true: also write <out>_nomusic.mp4 and print where to start the song in the app
   "bleeps": [{"t": 1.2, "dur": 0.35}],   // censor: the voice drops out under a tone ("t" seconds, or "at" a beat)
   "whisper": "turbo",         // speech model: "turbo" (fast) | "large" (OpenAI Whisper large-v3; needed for Hindi subtitles)
+  "allow_stills": false,      // true ONLY when the user explicitly asks for photos, a slideshow or a freeze;
+                              //   otherwise picture files, still/slideshow shots, freezes, burst and thumb_wall are refused
   "sfx": true,                // generated sound kit, auto-placed and levelled (docs/EFFECTS.md, "Sound effects")
 
   "dialogue": [               // optional: spoken lines that play FIRST, timed by the speech, not the beat
@@ -45,7 +47,8 @@ Relative paths resolve from the folder you run the command in. Pass `--relative`
 
   "shots": [                  // contiguous, sorted by "from"
     {"src": "input/a.mp4", "from": -20, "to": -16, "peak": 48.6,   // peak = source second centred in the shot
-     "speed": "slow",         // normal | settle | slow | slower | ramp | quick | push | hold | freeze | 0.7 | {profile}
+     "speed": "slow",         // default velocity | normal | settle | slow | slower | ramp | quick | push | 0.7 | {profile}
+                              //   (hold: poster frames only; freeze: needs "allow_stills")
      "look": "mono", "zoom": [1.05, 1.15],
      "cx": 0.5, "cy": 0.45,   // fixed framing; omit for automatic face framing (whole heads, eyes on the upper third)
      "fit": true,             // keep heads whole: zoom limited per scene, picture shown smaller with fill if needed
@@ -61,9 +64,9 @@ Relative paths resolve from the folder you run the command in. Pass `--relative`
      "size": 120, "y": 1420, "hum": 0.5, "glow": 1.0, "font": "condensed"}
   ],
 
-  "thumb_wall": {"paths": ["thumbs/1.jpg", "thumbs/2.jpg"], "from": -20, "to": -16, "every": 0.5},
+  "thumb_wall": {"paths": ["thumbs/1.jpg", "thumbs/2.jpg"], "from": -20, "to": -16, "every": 0.5},   // needs "allow_stills"
 
-  "burst": {"paths": ["pics/1.jpg", "pics/2.jpg", "pics/3.jpg"], "from": 4, "frames": 2},   // photo strobe
+  "burst": {"paths": ["pics/1.jpg", "pics/2.jpg", "pics/3.jpg"], "from": 4, "frames": 2},   // photo strobe; needs "allow_stills"
 
   "overlays": [{"path": "overlays/light.mp4", "from": 0, "to": 4, "blend": "screen", "opacity": 0.8,
                 "tint": [255, 60, 40], "rot": 90}],                // your own light/particle/dust clips
@@ -116,7 +119,10 @@ Hits can also carry `"sfx"` (a sound name or `null`). A `{"type": "gap", "at": 8
 {"at": 4, "type": "eyes", "color": "red", "dur": 2.0, "att": 0.15, "shape": "hold", "sfx": null},   // a hit: glowing eyes
 {"emoji": "🥶", "from": 4.5, "to": 8, "follow": true}               // an image: colour emoji, riding on the chest
 ```
-- `eyes` colours: `red`, `blue`, `purple`, `white`. It needs a visible face; with none tracked it is skipped.
+- `eyes` colours: `red`, `blue`, `purple`, `white`, `yellow`, `gold`. It needs a visible face; with none tracked it is skipped.
+- `{"at": -2, "type": "lightning", "color": "blue", "dur": 1.2, "att": 0.1, "shape": "hold"}`: lightning eyes (glowing pupils with bolts striking out); colours as `eyes`, default `yellow`.
+- `"muffle": [{"from": -8, "to": 0, "hz": 500}]` (top level): the music muffled between two beats, opening on `to`.
+- Shot `"zoom_ease": "out"`: the zoom starts fast and glides to rest (ending-montage entrances: `"zoom": [1.4, 1.0]`).
 - `emoji` images default to `w` 300 and a `pop`. `follow: true` puts them 3.5 eye-spacings below the eyes, so they scale with the face; `{"below": 2}` moves them up, `{"dx": 200}` to the side.
 - Any `look` can be a `.cube` file path (from `clip.py match-look` or any 3D LUT), resolved like other paths.
 
@@ -131,7 +137,7 @@ Hits can also carry `"sfx"` (a sound name or `null`). A `{"type": "gap", "at": 8
 | `quick` | 160% → 35% | a kick that slides into slow-mo; 1-beat punches |
 | `push` | 50% → 180% | accelerating into the drop |
 | `hold` | 8%, a near-freeze | under poster frames |
-| `freeze` | a freeze frame | stops on a moment |
+| `freeze` | a freeze frame | only when the user asks for one (needs `"allow_stills": true`) |
 
 Pro velocity edits rarely go past 2x (see `PLAYBOOK.md`); `smooth`, `decel` and `boomerang` are the stronger stylised curves.
 

@@ -87,12 +87,13 @@ Shot options:
   - `false` turns it off.
 
 ## Looks (grades)
-`clean`, `punchy`, `teal_orange`, `dark`, `mono`, `warm_film`, `bright` (wholesome: airy, colourful, glowing highlights), plus `crisp4k`, `hdr` and `poster` below. Each is a contrast S-curve with shadow and highlight tint, saturation, sharpening, grain and vignette. A shot's `look` overrides the plan default, so a story can go from mono in the setup to colour on the drop.
+`clean`, `punchy`, `teal_orange`, `dark`, `mono`, `warm_film`, `bright` (wholesome: airy, colourful, glowing highlights), `enhance` (the AI-upscale look: fine skin texture cored away while real edges stay and get sharpened, blacks lifted, bright pastel mids), `cine` (crushed blacks, hot highlights, contrast 1.32, gritty clarity, warm), plus `crisp4k`, `hdr` and `poster` below. Each is a contrast S-curve with shadow and highlight tint, saturation, sharpening, grain and vignette. A shot's `look` overrides the plan default, so a story can go from mono in the setup to colour on the drop.
 
 Any `.cube` 3D LUT path also works as a `look` (trilinear, then the clean base). `clip.py match-look REF SRC --out look.cube` fits one to a reference: give `--map ref_t:src_t,...` when both show the same footage (tone curves plus a colour matrix, outliers rejected), or it matches the overall colour statistics.
 
 ## Glowing eyes and emoji
 - `eyes` hit: a hot core and a horizontal flare on each tracked eye, bloomed and screened on. `color`: `red` (menace, the classic mono-grade stare), `blue`, `purple` or `white`; `amt` sets strength.
+- `lightning` hit: lightning eyes. The pupils glow (with a slow flicker) and every ~2.5 frames a new jagged bolt strikes from an eye, outward and down the cheek, sometimes both eyes, sometimes an arc between them, sometimes none: a white core in a coloured glow, re-shaped each strike from a fixed seed so renders repeat. `color`: `yellow` (default, warm white), `white`, `blue`, `purple`, `red`, `gold`. Best on a dark or `cine` shot of a stare, held 1–2 s before the drop.
 - `emoji` images: a colour emoji drawn from the system emoji font (Apple Color Emoji or Noto Color Emoji). Pick one that says the drop: 🥶 cold or impressed, 💀 dead or funny, 🤯 mind-blown, 😳 shocked, 🗿 deadpan. One per edit.
 
 ## Split screen
@@ -108,7 +109,7 @@ Fields:
 - `glow`: 0–1.2, with `glow_radius` and `glow_color`.
 - `hum`: 0–0.6 sets the depth of the audio-reactive 50 Hz flicker. A 50 Hz sine sampled at 30 fps aliases to a slow three-frame shimmer. Its depth follows the music's onset envelope, and the hardest onsets drop the layer for one frame. Set `hum_drop: false` to keep logos solid.
 - `[brackets]`: words inside brackets use the `accent` colour.
-- `bar`: `[r,g,b]`, a solid bar behind each line (`bar_pad` 0.35 of the size), for meme labels such as a red bar reading MOGGED across the eyes (the `label` style; put it on a freeze frame with `follow: {"dy": 0}` to sit on the eyes).
+- `bar`: `[r,g,b]`, a solid bar behind each line (`bar_pad` 0.35 of the size), for meme labels such as a red bar reading MOGGED across the eyes (the `label` style; put it on a slow-motion shot with `follow: {"dy": 0}` to sit on the eyes).
 - Story text styles: `title`, `slam`, `type`, `subtitle` (small, white, word by word, fading out), `label` and `poster`.
 - Captions (`plan.captions.style`): `clip` (big, bold, 1–3 words, the clip-page style) or `edit` (one small line that fades up word by word as it is spoken, key words in red; the default for story dialogue). Hindi and other non-Latin scripts switch to a font that contains them. Joined scripts render best where Pillow has complex-text layout (libraqm); without it a few joined letters may not form.
 - `font`: `heavy`, `condensed`, `bold`, `regular`, `poster`, `wide`, `mono`, `hand` (thin handwritten), or a path to a .ttf file.
@@ -136,14 +137,14 @@ The `poster` look (heavy grain, rich colour, no sharpening) and `"speed": "hold"
 
 ## Shot extras
 - `"layout": "card"`: picture-in-picture. The shot shrinks to `card_scale` (0.78) with rounded corners and a soft shadow over a treated copy of itself (`card_bg`: `halftone`, `mono` or `blur`).
-- `"speed": "freeze"`: a freeze frame. `hold` is a near-freeze with a little life.
+- `"speed": "freeze"`: a freeze frame, only when the user asks for one (`"allow_stills": true`). `hold` is a near-freeze, only under a poster frame.
 - `"camera_flow": {"every": 1, "zoom": 0.12, "roll": 10, "pan": 0, "dur": 1.6, "ease": 2.5}` (story shots): every beat adds a new eased camera move on top of the last, alternating dolly in/out and roll left/right. Use `true` for the defaults.
 - `"pulse": 1` (story shots): every N beats, an exposure kick (+0.7) and a defocus snap that decay over the beat.
 - `zooms` keyframes take `"curve": "out"`: the move bursts out on its beat and glides to rest, instead of an S-curve centred on the beat.
 
 ## Overlays and photo bursts
 - `overlays` (story or plan): user-supplied clips such as light leaks, particles, dust or smoke, blended over the footage. Fields: `{path, from, to, blend: screen|add|lighten|multiply|overlay, opacity, tint [r,g,b], key [r,g,b] (chroma key, key_tol 90), scale, rot (90 turns a landscape clip upright), speed, src_in}`. The tool ships no overlay footage; use your own or royalty-free packs.
-- `burst` (story): a photo strobe, only with photos the user supplies for it (never a stand-in for footage). `{"paths": [...], "from": beat, "frames": 2, "w": 1080, "y": 960}` shows each picture for 2 frames.
+- `burst` (story): a photo strobe, only when the user explicitly asks for one with their own photos (`"allow_stills": true`; refused otherwise). `{"paths": [...], "from": beat, "frames": 2, "w": 1080, "y": 960}` shows each picture for 2 frames.
 
 ## Image layers
 Thumbnails, logos and cards take these fields:
@@ -153,6 +154,12 @@ Thumbnails, logos and cards take these fields:
 - `anim`: `pop`, `slam`, `drop` or `fade`.
 - `grow`: slow scale creep.
 - `kf: [[t, x, y, scale], ...]`: keyframed motion with smoothstep easing (used for the cursor and button press).
+
+## Zoom easing
+A shot's `zoom: [a, b]` eases with a smooth S-curve. `"zoom_ease": "out"` makes it start fast and glide to rest instead (a cubic ease-out): `"zoom": [1.4, 1.0], "zoom_ease": "out"` is the shot entrance of the ending montage.
+
+## Muffled music (`muffle`)
+`"muffle": [{"from": -8, "to": 0, "hz": 500}]` (story spec, beats; or `t0`/`t1` in seconds) puts the music behind a wall with a low-pass at `hz` (450 heavy, 1300 "behind a door"), then opens it back to full range over 0.3 s at `to`. Speech and sound effects stay clear.
 
 ## Velocity zoom chain (`zooms`)
 A chain of zoom keyframes, each with scale, rotation and position, where every move builds on the last. Every zoom lands on a beat and pushes **further** into a new point, such as the chest, then the face, then the eyes. The edges stay mirrored the whole time, and each move is motion-blurred.

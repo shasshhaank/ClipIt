@@ -76,10 +76,60 @@ def eye_glow(frame, pts, amt, color="red"):
         cv2.ellipse(layer, (int(x), int(y)), (int(r * 5), max(1, int(r * 0.35))), 0, 0, 360, 0.7, -1, cv2.LINE_AA)
     glow = cv2.GaussianBlur(layer, (0, 0), r * 0.8) * 1.4 + cv2.GaussianBlur(layer, (0, 0), r * 3) * 1.6 \
         + cv2.GaussianBlur(layer, (0, 0), r * 9) * 0.9
-    tint = np.array({"red": (0.1, 0.05, 1.0), "blue": (1.0, 0.45, 0.1), "purple": (1.0, 0.2, 0.8),
-                     "white": (1.0, 1.0, 1.0)}.get(color, (0.1, 0.05, 1.0)), np.float32)   # BGR
+    tint = np.array(EYE_TINT.get(color, EYE_TINT["red"]), np.float32)
     core = cv2.GaussianBlur(layer, (0, 0), r * 0.35)[..., None] * 0.6
     return _screen(frame, glow[..., None] * tint * amt + core * amt)
+
+
+EYE_TINT = {"red": (0.1, 0.05, 1.0), "blue": (1.0, 0.45, 0.1), "purple": (1.0, 0.2, 0.8), "white": (1.0, 1.0, 1.0),
+            "yellow": (0.55, 0.95, 1.0), "gold": (0.15, 0.6, 1.0)}   # BGR
+
+
+def _bolt(layer, a, b, rng, width, depth=6, branch=True, rough=0.2):
+    """A jagged lightning path from a to b (midpoint displacement), tapering toward b, with a side fork."""
+    pts = np.array([a, b], np.float64)
+    off = math.dist(a, b) * rough
+    for _ in range(depth):
+        mid = (pts[:-1] + pts[1:]) / 2
+        seg = pts[1:] - pts[:-1]
+        nrm = np.stack([-seg[:, 1], seg[:, 0]], 1) / (np.linalg.norm(seg, axis=1, keepdims=True) + 1e-6)
+        mid += nrm * rng.normal(0, off, (len(mid), 1))
+        pts = np.insert(pts, np.arange(1, len(pts)), mid, axis=0)
+        off *= 0.45
+    for j, part in enumerate(np.array_split(pts.astype(np.int32), 3)):   # thinner toward the tip
+        cv2.polylines(layer, [part], False, 1.0 - 0.2 * j, max(1, int(round(width * (1 - 0.3 * j)))), cv2.LINE_AA)
+    if branch and rng.random() < 0.6:   # a fork from somewhere in the middle, thinner and shorter
+        s = pts[int(len(pts) * rng.uniform(0.35, 0.7))]
+        d = (np.asarray(b) - np.asarray(a)) * rng.uniform(0.25, 0.45)
+        ang = rng.choice([-1, 1]) * rng.uniform(0.4, 0.9)
+        end = s + [d[0] * math.cos(ang) - d[1] * math.sin(ang), d[0] * math.sin(ang) + d[1] * math.cos(ang)]
+        _bolt(layer, tuple(s), tuple(end), rng, width * 0.6, depth - 2, False)
+
+
+def eye_lightning(frame, pts, amt, t, color="yellow", seed=0):
+    """Lightning eyes: every ~2.5 frames a new jagged bolt strikes out from an eye, outward and down the cheek
+    (sometimes both eyes, sometimes arcing between them, sometimes none), a white core in a coloured glow.
+    Repeatable: the strike pattern comes from the time and the seed."""
+    if amt <= 0.01 or len(pts) != 2:
+        return frame
+    h, w = frame.shape[:2]
+    d = max(8.0, math.dist(*pts))
+    rng = np.random.default_rng((seed * 7919 + int(t * 12)) & 0xFFFFFFFF)
+    layer = np.zeros((h, w), np.float32)
+    cx = (pts[0][0] + pts[1][0]) / 2
+    for x, y in pts:
+        if rng.random() < 0.42:
+            side = -1 if x < cx else 1
+            ang, ln = math.radians(rng.uniform(15, 70)), d * rng.uniform(0.9, 1.9)
+            _bolt(layer, (x, y), (x + side * ln * math.cos(ang), y + ln * math.sin(ang)), rng, d * 0.028)
+    if rng.random() < 0.12:   # an arc between the eyes
+        _bolt(layer, pts[0], pts[1], rng, d * 0.018, 5, False, 0.08)
+    if not layer.any():
+        return frame
+    tint = np.array(EYE_TINT.get(color, EYE_TINT["yellow"]), np.float32)
+    glow = cv2.GaussianBlur(layer, (0, 0), d * 0.04) * 2.0 + cv2.GaussianBlur(layer, (0, 0), d * 0.15) * 0.9
+    core = cv2.GaussianBlur(layer, (0, 0), 0.8)[..., None]
+    return _screen(frame, (glow[..., None] * tint + core) * amt)
 
 
 def lens_blur(frame, radius):
@@ -234,6 +284,13 @@ class Look:
         "bright": dict(contrast=1.04, sat=1.2, shadow=(6, 2, 0), high=(-6, 2, 10), grain=0.0, vig=0.08,
                        sharp=0.45, clarity=0.35, clarity_r=16, vib=0.3, bright=12, gamma=0.9, glow=0.3, glow_thr=0.7,
                        shadow_lift=0.15),
+        # "AI upscale" celebrity-edit look: skin texture smoothed, edges crisp, blacks lifted, bright pastel mids
+        "enhance": dict(contrast=1.05, sat=1.1, shadow=(6, 2, 0), high=(-4, 0, 6), grain=0.0, vig=0.08, smooth=0.8,
+                        sharp=1.0, clarity=0.2, clarity_r=12, vib=0.2, bright=5, gamma=0.94, glow=0.12, glow_thr=0.78,
+                        shadow_lift=0.1),
+        # cinematic punch: crushed blacks, hot highlights, gritty sharpened texture, warm
+        "cine": dict(contrast=1.32, sat=1.15, shadow=(2, 0, -6), high=(-6, 2, 10), grain=0.02, vig=0.3, sharp=0.8,
+                     clarity=0.45, clarity_r=12, vib=0.12, bright=-4, glow=0.15, glow_thr=0.8),
     }
 
     def __init__(self, name="punchy", w=OUT_W, h=OUT_H, seed=7):
@@ -262,6 +319,11 @@ class Look:
     def __call__(self, frame):
         p = self.p
         out = cv2.LUT(apply_lut(frame, self.cube) if self.cube is not None else frame, self.lut)
+        if p.get("smooth"):        # coring: fine low-contrast texture (skin, noise) fades, real edges stay
+            base = cv2.GaussianBlur(out, (0, 0), 2.0).astype(np.float32)
+            det = out.astype(np.float32) - base
+            keep = np.clip(np.abs(det).max(axis=2, keepdims=True) / 14.0, 0, 1) ** 2
+            out = np.clip(base + det * (1 - p["smooth"] * (1 - keep)), 0, 255).astype(np.uint8)
         if p.get("clarity"):       # local contrast: add back detail relative to a big blur
             h, w = out.shape[:2]
             r = p.get("clarity_r", 16)

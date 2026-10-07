@@ -12,7 +12,7 @@ from . import audio as A
 from . import reframe
 from .beats import analyze, choose_window
 from .media import load_audio, probe, save_audio
-from .moments import POLAR, shots as detect_shots
+from .moments import PICTURES, POLAR, shots as detect_shots
 from .render import remap_table
 from .transcribe import captions_ok, snap_speech, words_in
 
@@ -180,6 +180,8 @@ def edit_plan(sources, music, workdir, length=15.0, music_start=None, hook=None,
         pool = [dict(x) for x in shot_list]
     else:
         for s in sources:
+            if os.path.splitext(s)[1].lower() in PICTURES:
+                raise SystemExit(f"! {os.path.basename(s)} is a picture, not video: edits use real moving footage only")
             for sh in detect_shots(s, probe(s)):
                 if sh["slideshow"]:   # never cut photo slideshows into an edit
                     continue

@@ -667,6 +667,8 @@ class Renderer:
         if s.get("zoom_follow"):   # zoom tracks source progress (in on the way forward, out on the way back)
             _, _, v, _ = self._timing(s, t)
             e = v * v * (3 - 2 * v)
+        elif s.get("zoom_ease") == "out":   # fast, then gliding to rest (the outro-montage zoom-out)
+            e = 1 - (1 - u) ** 3
         else:
             e = u * u * (3 - 2 * u)
         zoom = z0 + (z1 - z0) * e
@@ -687,7 +689,7 @@ class Renderer:
             cy = zy
         c = dict(zoom=zoom, cx=cx, cy=cy, rot=zr, dx=0.0, dy=0.0, sy=1.0, zoom_blur=0.0, blur_len=0.0, rgb=0.0,
                  glitch=0.0, flash_w=0.0, flash_b=0.0, expo=1.0, inv=False, defocus=0.0, edges=0.0, jaws=0.0,
-                 rays=0.0, desat=0.0, ripple=0.0, sweep=-1.0, rim=0.0, eyes=0.0, eyes_color="red")
+                 rays=0.0, desat=0.0, ripple=0.0, sweep=-1.0, rim=0.0, eyes=0.0, eyes_color="red", bolts=0.0, bolts_color="yellow")
         base = dict(self.p.get("fx", {}), **s.get("fx", {}))
         for key in ("bloom", "leak", "vhs", "echo", "rgb_radial", "bulge", "halftone", "dust"):
             c[key] = base.get(key, 0.0)
@@ -806,8 +808,11 @@ class Renderer:
                 c["vhs"] = max(c["vhs"], a * e)
             elif typ == "leak":
                 c["leak"] = max(c["leak"], a * e)
-            elif typ == "eyes":      # glowing eyes (red, blue, purple, white), e.g. from the drop on
+            elif typ == "eyes":      # glowing eyes (red, blue, purple, white, yellow, gold), e.g. from the drop on
                 c["eyes"], c["eyes_color"] = max(c["eyes"], a * e), h.get("color", "red")
+            elif typ == "lightning":   # lightning eyes: glowing pupils with bolts striking out of them
+                c["eyes"], c["eyes_color"] = max(c["eyes"], 0.8 * a * e), h.get("color", "yellow")
+                c["bolts"], c["bolts_color"] = max(c["bolts"], a * e), h.get("color", "yellow")
             elif typ == "handheld":
                 hx, hy, hr = fx.handheld(t, h.get("px", 14) * a * e, h.get("speed", 1.0))
                 c["dx"] += hx
@@ -906,7 +911,9 @@ class Renderer:
         img = self.looks[s.get("look", self.p.get("look", "punchy"))](img)
         if c["eyes"] > 0.01 and (s.get("track") or {}).get("eyes"):   # glowing eyes ride on the tracked eye points
             e = [float(np.interp(src_t, s["track"]["t"], v)) for v in s["track"]["eyes"]]
-            img = fx.eye_glow(img, [self._to_out(s, c, e[0], e[1]), self._to_out(s, c, e[2], e[3])], c["eyes"], c["eyes_color"])
+            pts = [self._to_out(s, c, e[0], e[1]), self._to_out(s, c, e[2], e[3])]
+            img = fx.eye_glow(img, pts, c["eyes"] * (0.93 + 0.07 * math.sin(t * 6.3)), c["eyes_color"])   # a slow flicker
+            img = fx.eye_lightning(img, pts, c["bolts"], t, c["bolts_color"], i)
         if c["edges"] > 0.01:
             img = fx.edge_glow(img, c["edges"], c["edges_color"], c["edges_grow"])
         if c["desat"] > 0.01:

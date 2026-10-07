@@ -68,6 +68,9 @@ def render(plan, out, wd=None, draft=False):
     subprocess.run([FFMPEG, "-v", "error", "-y", "-i", out, "-vf", f"fps={30 / max(plan['duration'], 1):.4f},"
                     "scale=216:-2,tile=6x5:padding=4:color=white", "-frames:v", "1", sheet], check=True)
     print("done:", out, "\ncontact sheet:", sheet)
+    from clipper.moments import static_spans
+    for a, b in static_spans(out):   # nothing may stand still on screen for more than a second
+        print(f"  ! the picture stands still {a:.1f}-{b:.1f}s: swap in a moment with movement, cut it shorter, or play it faster")
     if plan.get("audio_nomusic"):
         nm = out.replace(".mp4", "_nomusic.mp4")
         subprocess.run([FFMPEG, "-v", "error", "-y", "-i", out, "-i", plan["audio_nomusic"], "-map", "0:v", "-map", "1:a",
@@ -437,7 +440,7 @@ def cmd_testmedia(a):
                     put(snare, t, .8)
         x /= np.abs(x).max() * 1.1
         save_audio(beat, np.stack([x, x]), sr)
-    # placeholder logo + "thumbnails" so examples/demo_story.json runs out of the box
+    # placeholder logo so examples/demo_story.json runs out of the box
     import cv2
     logo = os.path.join(d, "logo.png")
     if not os.path.exists(logo):
@@ -447,16 +450,6 @@ def cmd_testmedia(a):
         cv2.putText(im, "YOUR", (230, 420), cv2.FONT_HERSHEY_DUPLEX, 4, (255, 255, 255), 8)
         cv2.putText(im, "LOGO", (230, 560), cv2.FONT_HERSHEY_DUPLEX, 4, (255, 255, 255), 8)
         cv2.imwrite(logo, im)
-    cap = cv2.VideoCapture(act)
-    for i, t in enumerate((1.0, 4.0, 7.5, 10.0, 13.0, 16.0)):
-        tp = os.path.join(d, f"thumb{i}.jpg")
-        if not os.path.exists(tp):
-            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
-            ok, f = cap.read()
-            f = cv2.resize(f, (1280, 720))
-            cv2.putText(f, f"VIDEO #{i + 1}", (60, 140), cv2.FONT_HERSHEY_DUPLEX, 3.2, (0, 0, 0), 18)
-            cv2.putText(f, f"VIDEO #{i + 1}", (60, 140), cv2.FONT_HERSHEY_DUPLEX, 3.2, (255, 255, 255), 6)
-            cv2.imwrite(tp, f)
     print("test media:", act, beat, logo)
 
 

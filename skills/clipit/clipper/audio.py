@@ -207,6 +207,22 @@ def dip(x, t0, t1, db=-18.0, ramp=0.015):
     return x * g
 
 
+def muffle(x, t0, t1, hz=500, ramp=0.06, opening=0.3):
+    """The music as if through a wall from t0 to t1 s (a low-pass at `hz`), opening back to full range over
+    `opening` s: muffled under a tense or spoken stretch, full again on the cut or drop."""
+    from scipy.signal import butter, sosfiltfilt
+    s, e = int(max(0, t0) * SR), int(max(0, t1) * SR)
+    if e <= s or s >= x.shape[1]:
+        return x
+    lp = sosfiltfilt(butter(4, hz, "low", fs=SR, output="sos"), x, axis=1).astype(np.float32) * 1.4   # keep the body
+    m = np.zeros(x.shape[1], np.float32)
+    m[s:e] = 1
+    r, o = int(ramp * SR), int(opening * SR)
+    m[max(0, s - r):s] = np.linspace(0, 1, s - max(0, s - r))
+    m[e:e + o] = np.linspace(1, 0, len(m[e:e + o])) ** 2
+    return x * (1 - m) + lp * m
+
+
 def thin_out(x, at, dur=0.8):
     """From `at` s on, progressively cut the low end (bass falls away as the edit ends)."""
     s = int(max(0, at) * SR)

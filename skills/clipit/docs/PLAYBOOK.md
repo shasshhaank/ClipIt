@@ -92,7 +92,8 @@ A 9:16 crop of 16:9 footage is only 56% of its width, so a close-up head is ofte
 ## Music that never cuts
 - Start on a downbeat with a short fade-in (or at the song's own start).
 - Keep the bed continuous under jump cuts and dialogue: it ducks smoothly under speech (60 ms down, 450 ms back up) and never mutes.
-- No dropouts: don't dip the music for "gaps" unless the song itself breaks there.
+- No dropouts: don't dip the music for "gaps" unless the song itself breaks there. The two deliberate exceptions, both a single moment per edit: dead air of 0.25–0.5 s right before a punchline or a reveal, with the music slamming back ON it (a `gap` hit with `"db": -40, "dur": 0.4` ending on the punchline's beat), and the music pulled under one bare line of a joke.
+- **Muffle, then open:** under a tense or spoken stretch, the music can sit behind a wall (`muffle`, a low-pass at 450–1300 Hz; lower is heavier) and open to full range exactly on the next cut or the drop. It reads as "something is about to happen" and makes the open land like a drop. Use it once or twice per edit.
 - End on a bar line (the `edit` planner rounds the length to whole bars) with a long fade-out of about 1.5 s, while the picture fades to black and the low end falls away.
 
 ## Cutting to music
@@ -162,7 +163,7 @@ Patterns that came up again and again in working After Effects projects for velo
 - Leave smooth sections (`mix` dissolves, slow-motion holds) quiet.
 
 ## Looks
-`teal_orange` for sports and hype, `dark` or `mono` for villain/sigma/emotional edits, `punchy` for clip pages, `warm_film` for nostalgic edits. Add grain and a vignette to edits, and a letterbox (0.08–0.12) for cinematic ones.
+`enhance` for celebrity and movie edits (the "4K" AI-upscale look: smooth skin, crisp edges, lifted blacks, bright), `cine` for action recaps (crushed blacks, hot highlights, gritty), `teal_orange` for sports and hype, `dark` or `mono` for villain/sigma/emotional edits, `punchy` for clip pages, `warm_film` for nostalgic edits. Add grain and a vignette to edits, and a letterbox (0.08–0.12) for cinematic ones.
 
 ## Music by vibe
 - Hype/aura/football: Brazilian phonk ("funk"/montagem, 129–130 BPM).
@@ -180,10 +181,29 @@ All caps, heavy font, 1–3 words per card, never two lines. White with a 9px bl
 - `box`: one word at a time, tall condensed yellow caps on a solid black box. Best for fast two-person clips.
 - Use at most three caption and text animations in one edit; consistency reads as a brand.
 
+## Nothing stands still for more than a second
+Viewers scroll the moment the picture stops changing. Every second of an edit must show real movement in the picture: a swing, a turn of the head, a walk, a celebration. A camera zoom or drift over a calm face doesn't count (it reads as a photo with a Ken Burns move). The professional edits we measured never hold a still picture for a full second outside a rare static establishing shot.
+- `story` measures each shot at the speed it will play; a shot that would stand still for over a second keeps about a second (whole beats) and the rest is cut into sub-second pieces of the clip's liveliest moments.
+- Every render is scanned (`moments.static_spans`: the camera move between frames a second apart is cancelled, then what's left of the change is measured) and still stretches are printed with their times.
+- Slow motion needs motion: slow a swing, a jump or a celebration, never a stare.
+
+## The ending montage (the smooth outro)
+The most-copied ending in movie and celebrity edits: after the payoff line, the song takes over and the edit runs through the best moments in an **accelerating montage** (the film term is an accelerating *metric montage*: shots get shorter to build). Measured on two edits with millions of views:
+1. **Cut on the song's 8th notes and speed up:** shots of about 0.75 s, then 0.47, then 0.3, then a final hold. In a spec: 1-beat shots, then half-beat shots, then 2–4 beats on the last image.
+2. **Every shot enters 1.3–1.45× zoomed in and eases out fast, then glides** (`"zoom": [1.4, 1.0], "zoom_ease": "out"`), so the motion never stops. The camera blur on the fast start hides each cut. Use `"fit": false` on close-ups so the zoom starts from a full-frame crop.
+3. **One rhythm break:** a single `spin` or swirl transition in the middle, not on every cut.
+4. **Save the money shots for it:** the smile, the kiss, the look back, the celebration. Bright and soft (`enhance` or `bright` look).
+5. A **dip to dark with a whoosh** leads from the dialogue into it; the song is already playing or enters there.
+
+## Story recaps and dialogue edits (formats from movie edits)
+- **Dialogue scene → punchline → outro:** trim a scene for comic timing (cut on the lines, shot/reverse-shot, tiny alternating pushes of 1–6% per second), a small "WAIT FOR END" card early to promise a payoff, dead air before the punchline and the music hitting on it, then the ending montage.
+- **Action recap:** a black-on-white context bar at the top for the first seconds ("he accidentally falls out of a plane…"), the scene's own audio over a slowed song, constant motion (spins, zoom-throughs, motion blur), the music muffled on tense parts and opening on the cut, one black frame with near-silence as the dramatic pause, then the ending montage.
+- **Two-tier captions** for the scene's own lines: a small, wide-spaced white lead-in above a big condensed punch line with a colour gradient and glow, one colour per line (green, purple, gold). Two `texts` cards: a `subtitle` and a `title` with `gradient`.
+
 ## Clip formats (stream, podcast and reaction clips)
 Three shapes that keep working for clips of real moments. Each is a story spec; check every line is really said.
 
-**Aura / drop clip (12–18 s), when the payoff is a silent reaction: a stare, a smirk, a freeze.**
+**Aura / drop clip (12–18 s), when the payoff is a silent reaction: a stare or a smirk, in slow motion.**
 1. Hook in frame 1: open on the boldest question or claim, mid-sentence if needed. No intro card.
 2. Setup: each line its own `dialogue` entry on the speaker, 0.5–2.5 s, dead air and side lines cut.
 3. Escalation: someone repeats or questions the claim; a punch-in on the key word.

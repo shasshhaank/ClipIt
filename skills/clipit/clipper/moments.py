@@ -158,7 +158,41 @@ def looks_still(src, t0, t1):
     return len(frames) > 1 and max(float(np.abs(a - b).mean()) for a, b in zip(frames, frames[1:])) < 0.5
 
 
+PICTURES = (".jpg", ".jpeg", ".png", ".webp", ".heic", ".gif", ".bmp")   # still images are never footage
 STILL_ON_SCREEN = 4.0   # below this a shot reads as a still picture (calibrated on shots viewers called "a slideshow")
+
+
+def static_spans(path, win=1.0, step=0.2, thr=STILL_ON_SCREEN):
+    """Where a finished video stands still for longer than `win` s: [(t0, t1), ...]. The camera move between two
+    frames `win` apart is cancelled first (zooms, pans and drift don't count as movement), then what's left of the
+    picture change is measured; under `thr` the picture is static (a calm stare in slow motion, a photo, a graphic)."""
+    cap = cv2.VideoCapture(path)
+    every = max(1, round((cap.get(cv2.CAP_PROP_FPS) or 30) * step))
+    frames, k = [], 0
+    while cap.grab():
+        if k % every == 0:
+            g = cv2.cvtColor(cv2.resize(cap.retrieve()[1], (108, 192), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)
+            frames.append(cv2.GaussianBlur(g, (0, 0), 1.5).astype(np.float32))
+        k += 1
+    cap.release()
+    lag, spans = round(win / step), []
+    crit = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 60, 1e-4)
+    for i in range(len(frames) - lag):
+        a, b = frames[i], frames[i + lag]
+        try:
+            _, W = cv2.findTransformECC(a, b, np.eye(2, 3, dtype=np.float32), cv2.MOTION_AFFINE, crit, None, 1)
+        except cv2.error:
+            continue   # can't be aligned: the picture changed completely
+        flags = cv2.WARP_INVERSE_MAP
+        m = cv2.warpAffine(np.ones_like(b), W, b.shape[::-1], flags=cv2.INTER_NEAREST + flags)[12:-12, 8:-8] > 0
+        d = np.abs(cv2.warpAffine(b, W, b.shape[::-1], flags=cv2.INTER_LINEAR + flags) - a)[12:-12, 8:-8]
+        if m.sum() > 500 and float(d[m].mean()) < thr:
+            t = i * step
+            if spans and t <= spans[-1][1]:
+                spans[-1][1] = t + win
+            else:
+                spans.append([t, t + win])
+    return [tuple(round(x, 1) for x in s) for s in spans]
 
 
 def action_window(src, src_in, span, prof, out_len, lo, hi, step=0.25):

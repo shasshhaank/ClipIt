@@ -6,6 +6,7 @@ drop (0 = drop, -4 = one bar before, 8 = two bars after). Fractions are allowed 
 See docs/STORY_SPEC.md for every field.
 """
 import json
+import math
 import os
 import re
 
@@ -15,7 +16,7 @@ from . import assets
 from . import audio as A
 from .beats import analyze
 from .media import load_audio, probe
-from .moments import STILL_ON_SCREEN, action_window, looks_like_slideshow, looks_still
+from .moments import PICTURES, STILL_ON_SCREEN, action_window, looks_like_slideshow, looks_still
 from .planner import ASPECTS, _track, fit, lv, save_mix
 from .render import remap_table
 
@@ -259,7 +260,17 @@ def build(spec, workdir, base_dir="."):
     hits, texts, images = [], [], []
 
     # ------------------------------------------------------------ shots
-    for s in sorted(spec["shots"], key=lambda x: x["from"]):
+    stills_ok = spec.get("allow_stills", False)   # only when the user explicitly asks for photos or a slideshow
+
+    def no_stills(what):
+        if not stills_ok:
+            raise SystemExit(f"! {what}. ClipIt edits real moving footage: no photos, slideshows or freeze frames "
+                             f"unless the user explicitly asks for them (then set \"allow_stills\": true).")
+    if spec.get("burst") or spec.get("thumb_wall"):
+        no_stills("this spec puts a sequence of photos on screen (burst / thumb_wall)")
+    queue = sorted(spec["shots"], key=lambda x: x["from"])
+    while queue:
+        s = queue.pop(0)
         o0 = intro if s["from"] == first else bt(s["from"])
         o1 = until(s["to"])
         if s.get("layout") == "split":   # two feeds stacked top/bottom, playing in real time with their own sound
@@ -279,7 +290,11 @@ def build(spec, workdir, base_dir="."):
             shots.append(dict(panels[0], split=panels, voice=True, captions=False))
             print(f"  shot {s['from']:>6}..{s['to']:<6} split: {os.path.basename(panels[0]['src'])} / {os.path.basename(panels[1]['src'])}")
             continue
-        sp = s.get("speed", "normal")
+        if os.path.splitext(s.get("src", ""))[1].lower() in PICTURES:
+            no_stills(f"shot {s['from']}..{s['to']} is a picture file ({os.path.basename(s['src'])}), not video")
+        if s.get("speed") == "freeze":
+            no_stills(f"shot {s['from']}..{s['to']} is a freeze frame")
+        sp = s.get("speed", "velocity")   # the go-to: a fast-slow-fast ramp with flow slow-mo in the middle
         if s.get("voice") and sp not in ("normal", 1, 1.0):
             print(f"  ! shot {s['from']}..{s['to']} carries a voice, so it plays at normal speed (speed '{sp}' ignored)")
             sp = "normal"
@@ -300,14 +315,22 @@ def build(spec, workdir, base_dir="."):
             if abs(moved - src_in) > 0.05:
                 print(f"  shot {s['from']}..{s['to']}: moved to source {moved:.2f}s, where it shows more movement")
                 src_in = moved
-            if life < STILL_ON_SCREEN:
-                print(f"  ! shot {s['from']}..{s['to']} barely moves on screen ({life:.1f}): it reads as a still. Pick a "
-                      f"moment with action, or play it faster (\"normal\" or \"velocity\") or shorter. Most active "
-                      f"moments in this clip: {', '.join(f'{x:.1f}s' for x in active_moments(src))}")
+            if life < STILL_ON_SCREEN and o1 - o0 > 1.0:
+                # nothing stands still on screen for more than a second: keep a second of it (whole beats, or
+                # half beats on slow songs), then cut to the clip's liveliest moments, each under a second
+                step = max(0.5, math.floor(2.0 / B) / 2)
+                cuts = list(np.arange(s["from"], s["to"], step)) + [s["to"]]
+                lively = [m for m in active_moments(src, 8) if abs(m - (src_in + span / 2)) > 1.0] or [peak]
+                pieces = [dict(s, **{"from": float(a), "to": float(b)}, peak=lively[j % len(lively)], speed="normal")
+                          for j, (a, b) in enumerate(zip(cuts[1:-1], cuts[2:]))]
+                print(f"  shot {s['from']}..{s['to']} stood still on screen ({life:.1f}): kept {step:g} beat(s) of it, "
+                      f"then cut to the liveliest moments of the clip ({', '.join('%.1fs' % x['peak'] for x in pieces)})")
+                queue[:0] = [dict(s, to=float(cuts[1]))] + pieces
+                continue
         shot = {"src": src, "out": [o0, o1], "src_in": src_in, "src_span": span, "profile": prof,
                 "zoom": s.get("zoom", [1.0, 1.1]), "layout": s.get("layout", "fill"), "captions": False,
                 "voice": bool(s.get("voice")), "edge": s.get("edge", edge)}
-        for key in ("look", "blur", "dim", "fx", "stepped_fps", "posterize", "interp", "mix", "zoom_follow"):
+        for key in ("look", "blur", "dim", "fx", "stepped_fps", "posterize", "interp", "mix", "zoom_follow", "zoom_ease"):
             if key in s:
                 shot[key] = s[key]
         if prof["type"] == "boomerang" and "zoom_follow" not in s:
@@ -354,7 +377,7 @@ def build(spec, workdir, base_dir="."):
             shot["cx"], shot["cy"] = s["cx"], s.get("cy", 0.45)
         if s.get("fit", True) and shot["layout"] == "fill":
             shot["fit_z"], shot["zoom"] = fit(shot["track"], shot["zoom"])
-        if min(prof.get("speed", 1), prof.get("lo", 1)) < 0.6 and "interp" not in shot:
+        if min(prof.get("speed", 1), prof.get("lo", 1)) <= 0.6 and "interp" not in shot:
             shot["interp"] = spec.get("slowmo_interp", "flow")
         if s.get("voice"):   # a soundbite: its own speech, music ducked; the voice runs on under the next shot
             from .transcribe import line_ok, snap_speech, words_in   # until the sentence ends (an L-cut)
@@ -370,13 +393,11 @@ def build(spec, workdir, base_dir="."):
         print(f"  shot {s['from']:>6}..{s['to']:<6} {os.path.basename(src)}  src {src_in:.2f}-{src_in + span:.2f}s "
               f"({prof['type']})")
         if looks_like_slideshow(src, src_in, src_in + span):
-            print(f"  ! shot {s['from']}..{s['to']} looks like a photo slideshow (sharp picture between blurred sides). "
-                  f"Use real video footage instead.")
-        elif sp in ("freeze", "hold") and s.get("look") != "poster":
-            print(f"  ! shot {s['from']}..{s['to']} is a freeze frame; it reads as a still picture. Use slow motion "
-                  f"unless the user asked for a freeze.")
+            no_stills(f"shot {s['from']}..{s['to']} is a photo slideshow (a sharp picture between blurred copies of itself)")
+        elif sp == "hold" and s.get("look") != "poster":
+            no_stills(f"shot {s['from']}..{s['to']} is a near-freeze (\"hold\" is only for poster frames)")
         elif not s.get("voice") and looks_still(src, src_in, src_in + max(span, 0.5)):
-            print(f"  ! shot {s['from']}..{s['to']} looks like a still picture (nothing moves). Use footage with movement.")
+            no_stills(f"shot {s['from']}..{s['to']} is a still picture (nothing in it moves)")
         shots.append(shot)
 
     # ------------------------------------------------------------ texts & images
@@ -551,6 +572,9 @@ def build(spec, workdir, base_dir="."):
     if mix.shape[1] < int((END + 0.6) * A.SR):
         mix = np.pad(mix, ((0, 0), (0, int((END + 0.6) * A.SR) - mix.shape[1])))
     mix = A.fade(mix, 0.3 if intro else 0.05, 1.5)   # the music never starts or stops abruptly
+    for mu in spec.get("muffle", []):   # the music behind a wall, opening up on the cut
+        mix = A.muffle(mix, mu["t0"] if "t0" in mu else bt(mu["from"]), mu["t1"] if "t1" in mu else bt(mu["to"]),
+                       mu.get("hz", 500))
     for h in hits:
         if h["type"] == "gap":   # audio-only hit, only when the spec asks: dip the music just before its moment
             mix = A.dip(mix, h["t"] - h.get("dur", 0.12), h["t"], h.get("db", -18))

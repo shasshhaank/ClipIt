@@ -28,7 +28,7 @@
       "from": -8,
       "to": -4,
       "peak": 8.0,
-      "speed": "hold",
+      "speed": "settle",
       "look": "mono"
     },
     {
@@ -134,19 +134,6 @@
       "dim": 0.4
     }
   ],
-  "thumb_wall": {
-    "paths": [
-      "input/test/thumb0.jpg",
-      "input/test/thumb1.jpg",
-      "input/test/thumb2.jpg",
-      "input/test/thumb3.jpg",
-      "input/test/thumb4.jpg",
-      "input/test/thumb5.jpg"
-    ],
-    "from": -12,
-    "to": -8,
-    "every": 0.5
-  },
   "texts": [
     {
       "text": "MILLIONS",

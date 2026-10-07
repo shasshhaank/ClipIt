@@ -26,6 +26,10 @@ this project isn't affiliated with any of them. Field details are in `EFFECTS.md
 | Layer motion blur, Transform shutter angle | camera motion blur | `camera_blur` (on by default) |
 | Twitch | jolt | `jolt` hit: Amount → `amt`, Speed → `speed` 0–1, Random Seed → `seed` |
 | S_Shake, `wiggle(freq, amp)` | shake | `shake` hit: Frequency → `freq` Hz, Amplitude → `px`, plus `rot`. For a constant wiggle use `fx: {"handheld": px}` |
+| Advanced Lightning, Saber on eye masks, CC Lightning (lightning eyes) | lightning eyes | `lightning` hit on a shot with a tracked face; `color`, `amt`; Conductivity State time expression → it re-strikes every ~2.5 frames on its own |
+| Easy Ease out with a steep start in the speed graph, Scale 130–250% → 100% | eased zoom-out | shot `zoom: [1.4, 1.0]`, `"zoom_ease": "out"` |
+| Bass & Treble (Treble −100), Lowpass / High Frequency Cut on the music | muffle | `muffle` with `hz` 450–1300 |
+| Unsharp Mask + Sharpen "4K CC", Topaz upscale | enhance | `enhance` look; `crisp4k` for sharper without skin smoothing |
 | Deep Glow, S_Glow, Glow | bloom | Threshold 60% → `bloom_threshold: 0.6`, Intensity → `amt` (hit) or `bloom` (fx); on text use `glow`, `glow_radius` and `glow_color` |
 | Motion Tile (Mirror Edges) | mirror edges | on by default (`"edge": "mirror"`) |
 | Optics Compensation | bulge | `bulge` hit: FOV 60–100 is about `k` 0.4–1.0; Reverse Lens Distortion is `k < 0` |
@@ -74,7 +78,7 @@ this project isn't affiliated with any of them. Field details are in `EFFECTS.md
 | Warp (Fisheye style, Bend −100) | pinch | `bulge` hit with `k` −0.8 and an `att` into the cut |
 | 3D camera parented to a chain of nulls (one move per beat) | camera flow | shot `camera_flow` |
 | Adjustment layer per beat (Lens Blur + Exposure keys) | beat pulse | shot `pulse` |
-| Time Remap with one hold keyframe | freeze frame | `speed: "freeze"` |
+| Time Remap with one hold keyframe | freeze frame | `speed: "freeze"` with `"allow_stills": true`, only when the user asks for a freeze |
 | Roto Brush (text behind the subject, rim-lit cut-outs) | subject cut-out | text `behind: true`, `rim` hit (optional cut-out model) |
 | Keylight on an overlay clip | chroma key | overlay `key` [r, g, b] |
 | Overlay / particle / shadow clips in Screen, Add or Lighten | overlays | `overlays` with `blend`, `tint`, `rot`, `opacity` |
@@ -124,6 +128,10 @@ this project isn't affiliated with any of them. Field details are in `EFFECTS.md
 | Auto captions: karaoke / word highlight templates | `"caption_style": "karaoke"` (or `box` for one word on a block) |
 | Emoji stickers, Tracking on a face | image `emoji` with `follow: true` |
 | Glowing eyes (Body effects) | `eyes` hit |
+| Lightning Eyes (Body effects > Headwear): Color, Glow, Strength, Range | `lightning` hit: `color`, `amt` |
+| Keyframes with the "Flow" curve, Pull out transition | shot `zoom: [1.4, 1.0]` with `"zoom_ease": "out"` |
+| Fancy Sharpen, Enhance quality, HDR | `enhance` look (or `crisp4k`) |
+| Voice changer Lo-Fi on the music | `muffle` |
 | Reverse | `speed: "reverse"` |
 | Reverse trend (clip + reversed copy) | `speed: "boomerang"` |
 | Keyframe scale with graph easing | shot `zoom: [a, b]` or `zooms` |
